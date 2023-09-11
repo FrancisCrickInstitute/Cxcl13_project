@@ -1,0 +1,356 @@
+<!-- Set PArameters Module -->
+<!-- Set the chnkPrefix to make all chunks unique in the overall folder -->
+```{r partB_create_variation_plots, echo=TRUE, eval=TRUE, warning=FALSE}
+chnkPrefix <- "partB.integrated.seurat.object."
+VersionPdfExt <- VersionPdfExt <- paste0(".",chnkPrefix,"V", gsub("-", "", Sys.Date()), ".pdf")
+
+```
+
+
+
+```{r partB_create-individual-varFeatures, echo=TRUE, eval=TRUE, warning=FALSE, results=F}
+###############################################################################
+## Do percent mt plots                                                       ##
+plotList <- list()
+chnkVec <- as.vector(NULL, mode = "character")
+
+## First make variation plot for integrated samples, than for all individual samples separately
+tag <- "Integrated_Samples"
+DefaultAssay(OsC) <- "RNA"
+
+
+OsC <- FindVariableFeatures(
+    object = OsC,
+    selection.method = 'vst', 
+    nfeatures = Obio@parameterList$NtopGenes
+)
+
+# Identify the 10 most highly variable genes
+label2000 <- paste0("integrated", "_", "top2000var")
+Obio@dataTableList$referenceList[[ label2000]]<- head(
+    x = VariableFeatures(object = OsC), 
+    2000
+)
+    
+label30 <- paste0("integrated", "_", "top30var")
+    Obio@dataTableList$referenceList[[ label30]]<- head(
+    x = VariableFeatures(object = OsC), 
+    30
+)
+
+
+## slot for variable features OsC@assays$RNA@var.features
+
+dfVar <- OsC@assays$RNA@meta.features
+names(dfVar) <- gsub("vst.", "",names(dfVar))
+dfVar[["gene"]] <- row.names(dfVar)
+
+OsC@meta.data[["all"]] <- "all"
+Idents(OsC) <- "all"
+    
+cluster.averages <- AverageExpression(
+    OsC, 
+    return.seurat = TRUE
+)
+    
+Idents(OsC) <- "sampleID"
+    
+dfAvgExpr <- data.frame(cluster.averages[["RNA"]]@data)
+dfAvgExpr[["gene"]] <- row.names(dfAvgExpr)
+names(dfAvgExpr)[1] <- "Avg.Expression"
+
+dfVar <- merge(
+    dfVar, 
+    dfAvgExpr, 
+    by.x = "gene",
+    by.y = "gene"
+)
+
+dfVar[["Type"]] <- "Standard"
+dfVar[dfVar$gene %in% OsC@assays$RNA@var.features, "Type"] <- "Most Variable"
+
+dfVar[["text"]] <- ""
+
+dfVar[dfVar$gene %in% as.vector(Obio@dataTableList$referenceList[[label30]]), "text"] <- dfVar[dfVar$gene %in% as.vector(Obio@dataTableList$referenceList[[label30]]), "gene"]
+
+#dotsize <- 0.5
+
+library(ggrepel)
+
+plotList[[tag]] <- ggplot(
+    data = dfVar, 
+        aes(
+            x=Avg.Expression, 
+            y=variance.standardized, label = text, color = Type
+        )
+  ) + geom_point( shape=16, size = dotsize
+  ) + xlab("Average Expression") + ylab("Variance Standarized"
+  ) + theme_bw(
+  ) +  theme(
+    axis.text.y   = element_text(size=8),
+    axis.text.x   = element_text(size=8),
+    axis.title.y  = element_text(size=8),
+    axis.title.x  = element_text(size=8),
+    axis.line = element_line(colour = "black"),
+    panel.border = element_rect(colour = "black", fill=NA, size=1),
+    plot.title = element_text(hjust = 0.5, size = 12)
+) + guides(col = guide_legend(override.aes = list(shape = 16, size = legendDotSize))    
+) + ggtitle(paste0("Variance vs. Expression in the Overall Experiment")
+) + scale_color_manual(values=c("#FF0000", "#000000")
+) + geom_text_repel(
+) 
+
+
+    
+###########################################################################
+## Save plot to file                                                     ##
+FNbase <- paste0("variation.integrated.samples", VersionPdfExt)
+FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+FNrel <- paste0("report_figures/", FNbase)
+    
+pdf(FN)
+    print(plotList[[tag]])
+dev.off()
+##                                                                       ##
+###########################################################################
+    
+link <- paste0('<a href="https://',urlString,'/',Obio@parameterList$project_id,'/scatterplot?x_axis=',paste0(tag, '_AvgExpr'),'&y_axis=',paste0(tag, '_var_std" target = "_blank">here</a>'))
+    
+
+figCap <- paste0(
+    '**Figure ',
+    figureCount,
+    ':** Variance versus averaged gene expression for overall sample.', 
+    names(SampleList)[i],
+    '. ',
+    'Download a pdf of this figure <a href="',FNrel,'" target="_blank">here</a>. ',
+    'An interactive version of this figure can be found ', link, '. '
+)
+    
+    
+   
+    
+NewChnk <- paste0(
+    "#### ",tag,
+    "\n```{r varplot_",tag,", results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",figCap,"'}\n",
+    "\n",
+    "\n print(plotList[['",tag,"']])",
+    "\n cat(  '\n')",
+    "\n\n\n```\n"   
+)
+     
+## Histogram Part C done                                                 ##
+###########################################################################
+    
+       
+chnkVec <- c(
+    chnkVec,
+    NewChnk
+)
+    
+figureCount <- figureCount + 1
+print(" All variation done.")
+
+## Now the individual samples ##
+
+xmax <- ceiling(max(dfVar$Avg.Expression))
+ymax <- ceiling(max(dfVar$variance.standardized))
+
+dfVarRes <- unique(
+    dfVar[,c("gene", "Avg.Expression", "variance.standardized")]
+)
+
+names(dfVarRes) <- gsub(
+    "Avg.Expression", paste0(tag, "_AvgExpr"), names(dfVarRes)
+)
+
+names(dfVarRes) <- gsub(
+    "variance.standardized", paste0(tag, "_var_std"), names(dfVarRes)
+)
+
+## Make variation plot for individual samples ##   
+if (length(SampleList) > 1){
+for (i in 1:length(SampleList)){
+    tag <- paste0("Ind_var_", names(SampleList)[i])
+    
+    
+    DefaultAssay(SampleList[[i]]) <- "RNA"
+
+    SampleList[[i]] <- FindVariableFeatures(object = SampleList[[i]])
+
+    SampleList[[i]] <- FindVariableFeatures(
+        object = SampleList[[i]],
+        selection.method = 'vst', 
+        nfeatures = 2000
+    )
+
+    # Identify the 10 most highly variable genes
+    label2000 <- paste0(names(SampleList)[i], "_", "top2000var")
+    Obio@dataTableList$referenceList[[ label2000]]<- head(
+        x = VariableFeatures(object = SampleList[[i]]), 
+        2000
+    )
+    
+    label30 <- paste0(names(SampleList)[i], "_", "top30var")
+    Obio@dataTableList$referenceList[[ label30]]<- head(
+        x = VariableFeatures(object = SampleList[[i]]), 
+        30
+    )
+
+
+    ## slot for variable features OsC@assays$RNA@var.features
+
+    dfVar <- SampleList[[i]]@assays$RNA@meta.features
+    names(dfVar) <- gsub("vst.", "",names(dfVar))
+    dfVar[["gene"]] <- row.names(dfVar)
+
+    Idents(SampleList[[i]]) <- "sampleID"
+    cluster.averages <- AverageExpression(
+        SampleList[[i]], 
+        return.seurat = TRUE
+    )
+    
+    dfAvgExpr <- data.frame(cluster.averages[["RNA"]]@data)
+    dfAvgExpr[["gene"]] <- row.names(dfAvgExpr)
+    names(dfAvgExpr)[1] <- "Avg.Expression"
+
+    dfVar <- merge(
+        dfVar, 
+        dfAvgExpr, 
+        by.x = "gene",
+        by.y = "gene"
+    )
+
+    dfVar[["Type"]] <- "Standard"
+    dfVar[dfVar$gene %in% SampleList[[i]]@assays$RNA@var.features, "Type"] <- "Most Variable"
+
+    dfVar[["text"]] <- ""
+    dfVar[dfVar$gene %in% as.vector(Obio@dataTableList$referenceList[[label30]]), "text"] <- dfVar[dfVar$gene %in% as.vector(Obio@dataTableList$referenceList[[label30]]), "gene"]
+
+    # dotsize <- 0.5
+
+    library(ggrepel)
+
+    plotList[[tag]] <- ggplot(
+        data = dfVar, 
+        aes(
+            x=Avg.Expression, 
+            y=variance.standardized, label = text, color = Type)
+            ) + geom_point( shape=16, size = dotsize
+            ) + xlab("Average Expression") + ylab("Variance Standarized"
+            ) + theme_bw(
+            ) +  theme(
+                axis.text.y   = element_text(size=8),
+                axis.text.x   = element_text(size=8),
+                axis.title.y  = element_text(size=8),
+                axis.title.x  = element_text(size=8),
+                axis.line = element_line(colour = "black"),
+                panel.border = element_rect(colour = "black", fill=NA, size=1),
+                plot.title = element_text(hjust = 0.5, size = 12)
+            ) + guides(col = guide_legend(override.aes = list(shape = 16, size = legendDotSize))
+            ) + ggtitle(paste0("Individual variance in the ", names(SampleList)[i],  " sample.")
+            ) + scale_color_manual(values=c("#FF0000", "#000000")
+            ) + geom_text_repel(
+            ) +  xlim(0, xmax) + ylim(0, ymax
+            ) 
+
+
+    
+    ###########################################################################
+    ## Save plot to file                                                     ##
+    FNbase <- paste0("Individual.var.features",names(SampleList)[i], VersionPdfExt)
+    FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+    FNrel <- paste0("report_figures/", FNbase)
+    
+    pdf(FN)
+        print(plotList[[tag]])
+    dev.off()
+    ##                                                                       ##
+    ###########################################################################
+    
+    
+    link <- paste0('<a href="https://',urlString,'/',Obio@parameterList$project_id,'/scatterplot?x_axis=',paste0(tag, '_AvgExpr'),'&y_axis=',paste0(tag, '_var_std" target="_blank">here</a>'))
+    
+
+    figCap <- paste0(
+        '**Figure ',
+        figureCount,
+        ':** Variance versus averaged gene expression for sample ', 
+        names(SampleList)[i],
+        '. ',
+        'Download a pdf of this figure <a href="',FNrel,'" target="_blank">here</a>. ',
+        'An interactive version of this figure can be found ', link, '. '
+    )
+    
+    NewChnk <- paste0(
+        "#### ",tag,
+        "\n```{r varplot_",tag,", results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",figCap,"'}\n",
+        "\n",
+        "\n print(plotList[['",tag,"']])",
+        "\n cat(  '\n')",
+        "\n\n\n```\n"   
+    )
+     
+    ## Histogram Part C done                                                 ##
+    ###########################################################################
+    
+       
+    chnkVec <- c(
+        chnkVec,
+        NewChnk
+    )
+    
+    figureCount <- figureCount + 1
+    print(paste0(names(SampleList)[i], " individual variation done."))
+    
+    ## Add to result table ##
+    dfVarTemp <- unique(
+    dfVar[,c("gene", "Avg.Expression", "variance.standardized")]
+    )
+    
+    names(dfVarTemp) <- gsub(
+        "Avg.Expression", paste0(tag, "_AvgExpr"), names(dfVarTemp)
+    )
+    
+    names(dfVarTemp) <- gsub(
+        "variance.standardized", paste0(tag, "_var_std"), names(dfVarTemp)
+    )
+    
+    dfVarRes <- merge(
+        dfVarRes, 
+        dfVarTemp, 
+        by.x = "gene",
+        by.y = "gene",
+        all = TRUE
+    )
+    dfVarRes[is.na(dfVarRes)] <- 0
+    
+}
+} # end if multiple samples
+
+## Make sure summary goes first ##
+Obio@dataTableList[["dfVariation"]] <- data.frame(NULL)
+Obio@dataTableList[["dfVariation"]] <- dfVarRes
+
+if (length(plotList) > 3){
+    tabVar <- ".tabset .tabset-fade .tabset-dropdown"
+} else {
+    tabVar <- ".tabset .tabset-fade .tabset-pills"
+}
+
+## Done create cellRanger QC plots                                           ##
+###############################################################################
+
+
+```
+
+
+## Result Figures
+### Quality Control Plots: Variable Features in the combined and all individual dataset {`r tabVar`}
+
+```{r create-var-feature-plot-II, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"}
+## plot list will be integrated in full figure ##
+cat(paste(knit(text = chnkVec, quiet = T), collapse = '\n'))
+```
+
+

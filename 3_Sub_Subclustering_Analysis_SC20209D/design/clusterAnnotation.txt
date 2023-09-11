@@ -1,0 +1,4 @@
+"seurat_clusters"	"clusterName"	"clusterColor"	"clusterOrder"
+"0"	"C0"	"#F8766D"	1
+"1"	"C1"	"#00BA38"	2
+"2"	"C2"	"#619CFF"	3

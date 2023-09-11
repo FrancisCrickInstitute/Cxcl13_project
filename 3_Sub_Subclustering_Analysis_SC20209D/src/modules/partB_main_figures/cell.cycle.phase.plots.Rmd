@@ -1,0 +1,551 @@
+<!-- Set PArameters Module -->
+<!-- Set the chnkPrefix to make all chunks unique in the overall folder -->
+```{r partB_cell_cycle_phase, echo=TRUE, eval=TRUE, warning=FALSE}
+chnkPrefix <- "partB.doublet."
+VersionPdfExt <- VersionPdfExt <- paste0(".",chnkPrefix,"V", gsub("-", "", Sys.Date()), ".pdf")
+
+```
+
+
+
+```{r Plot_dimred_by_cell_cycle_phase_data_prep, echo=TRUE, eval=TRUE, warning=FALSE, results=FALSE} 
+
+###############################################################################
+## Estimate cell cycle genes                                                 ##
+exprFN <- paste0(hpc.mount, "Projects/reference_data/cell_cycle_vignette_files/nestorawa_forcellcycle_expressionMatrix.txt")
+
+exp.mat <- read.table(file = exprFN, header = TRUE, 
+                      as.is = TRUE, row.names = 1)
+
+
+# A list of cell cycle markers, from Tirosh et al, 2015, is loaded with Seurat.  We can
+# segregate this list into markers of G2/M phase and markers of S phase
+s.genes <- cc.genes$s.genes
+g2m.genes <- cc.genes$g2m.genes
+
+print(paste0("Used as S-phase marker genes: ", sort(unique(paste(s.genes, collapse = ", ")))))
+print(paste0("Used as G2M-phase marker genes: ", sort(unique(paste(g2m.genes, collapse = ", ")))))
+
+# Create our Seurat object and complete the initalization steps
+OsC <- CellCycleScoring(OsC, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+
+reductionVec <- c("umap", "tsne")
+plotList <- list()
+chnkVec <- as.vector(NULL, mode = "character")
+
+###############################################################################
+## First UMAP all samples together                                           ##
+tag <- paste0("CellCyclePhase_All_Samples")
+dfPlot <- OsC@meta.data
+pos <- grep("included", names(dfPlot))
+if (length(pos) == 0){
+  dfPlot[["included"]] <- "+"
+}
+dfPlot[["cellID"]] <- row.names(dfPlot)
+dfPlot$UMAP_1 <- NULL
+dfPlot$UMAP_2 <- NULL
+            
+## Get UMAP coordinates ##
+coord <- data.frame(OsC@reductions$umap@cell.embeddings)
+coord[["cellID"]] <- row.names(coord)
+coord <-coord[coord$cellID %in% dfPlot$cellID, ]
+            
+dfPlot <- merge(dfPlot, coord, by.x = "cellID", by.y="cellID", all=T)
+dfPlot[is.na(dfPlot)] <- 0
+dfPlot <- dfPlot[dfPlot$UMAP_1 != 0 & dfPlot$UMAP_2 != 0,]
+            
+            
+## Add cluster colors ##
+#dfPlot[["Cluster"]] <- paste0("C", dfPlot$seurat_clusters)
+#clusterVec <- as.vector(paste0("C", unique(sort(dfPlot$seurat_clusters))))
+
+maxX <- 1.1*max(dfPlot$UMAP_1, na.rm = T)
+minX <- 1.1*min(dfPlot$UMAP_1, na.rm = T)
+maxY <- 1.1*max(dfPlot$UMAP_2, na.rm = T)
+minY <- 1.1*min(dfPlot$UMAP_2, na.rm = T)            
+
+# library(scales)
+# clusterCols = hue_pal()(length(clusterVec))
+# dfPlot$Cluster <- factor(dfPlot$Cluster, levels = clusterVec)
+
+# dotsize  = 1
+# if (nrow(dfPlot) > 10000){
+#   dotsize  = 0.75
+# } else if (nrow(dfPlot) > 20000){
+#   dotsize = 0.5
+# } else if (nrow(dfPlot) > 50000){
+#   dotsize = 0.25
+# }
+
+plotList[[tag]] <- ggplot(data=dfPlot[dfPlot$included == "+",], aes(UMAP_1, UMAP_2, color=Phase)
+            ) + geom_point( shape=16, size = as.numeric(dotsize)
+            ) + xlab("UMAP1") + ylab("UMAP2"
+            ) + theme_bw(
+            )  +  theme(
+                axis.text.y   = element_text(size=8),
+                axis.text.x   = element_text(size=8),
+                axis.title.y  = element_text(size=8),
+                axis.title.x  = element_text(size=8),
+                axis.line = element_line(colour = "black"),
+                panel.border = element_rect(colour = "black", fill=NA, size=1),
+                plot.title = element_text(hjust = 0.5, size = 12),
+                legend.title = element_blank()
+            ) + guides(col = guide_legend(override.aes = list(shape = 16, size = legendDotSize))
+            ) + ggtitle(paste0("Sample: ", tag)
+            ) + xlim(minX, maxX) + ylim(minY, maxY
+            ) + coord_fixed(ratio=1
+            ) 
+            
+if (length(unique(dfPlot$Cluster)) > 15){
+   plotList[[tag]] <- plotList[[tag]] + theme(legend.position = "none")
+}
+            FNbase <- paste0(tag, VersionPdfExt)
+            FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+            FNrel <- paste0("report_figures/", FNbase)
+            
+            pdf(FN)
+                print(plotList[[tag]])
+            dev.off()
+            
+            if (exists("shinyURL") & !is.null(shinyURL)){
+            link <- paste0(
+              'An interactive version of this figure with additional viewing options can be found <a href="',shinyURL,'?_inputs_&y_axis=%22UMAP_2%22&x_axis=%22UMAP_1%22&colorBy=%22Phase%22&splitByColumn=%22all%22" target="_blank">here</a>. '
+            )
+            
+            } else {
+              link <- ""
+            }
+            
+            figLegend <- paste0(
+                '**Figure ', 
+                figureCount, 
+                ':** ',
+                ' UMAP showing all cells from all samples together with the estimated cell-cycle phase color-coded. Download a pdf of this figure <a href="',FNrel,'" target="_blank">here</a>. ',
+                link
+            )
+            
+            figureCount <- figureCount + 1
+            
+            NewChnk <- paste0(
+                "#### ", tag,
+                "\n```{r CC_UMAP_",
+                tag,", results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",
+                figLegend,"'}\n",
+                "\n",
+                "\n print(plotList[['",tag,"']])",
+                "\n cat(  '\n')",
+                "\n\n\n```\n"   
+            )
+            
+            chnkVec <- c(
+                chnkVec,
+                NewChnk
+            )
+
+
+## Done first umap all samples                                               ##
+###############################################################################
+            
+###############################################################################
+## First tsne all samples together                                           ##
+tag <- paste0("tSNE_All_Samples")
+dfPlot <- OsC@meta.data
+pos <- grep("included", names(dfPlot))
+if (length(pos) == 0){
+  dfPlot[["included"]] <- "+"
+}
+dfPlot[["cellID"]] <- row.names(dfPlot)
+dfPlot$tSNE_1 <- NULL
+dfPlot$tSNE_2 <- NULL
+            
+## Get tsNE coordinates ##
+coord <- data.frame(OsC@reductions$tsne@cell.embeddings)
+coord[["cellID"]] <- row.names(coord)
+coord <-coord[coord$cellID %in% dfPlot$cellID, ]
+            
+dfPlot <- merge(dfPlot, coord, by.x = "cellID", by.y="cellID", all=T)
+dfPlot[is.na(dfPlot)] <- 0
+dfPlot <- dfPlot[dfPlot$tSNE_1 != 0 & dfPlot$tSNE_2 != 0,]
+            
+            
+## Add cluster colors ##
+#dfPlot[["Cluster"]] <- paste0("C", dfPlot$seurat_clusters)
+#clusterVec <- as.vector(paste0("C", unique(sort(dfPlot$seurat_clusters))))
+
+maxX <- 1.1*max(dfPlot$tSNE_1, na.rm = T)
+minX <- 1.1*min(dfPlot$tSNE_1, na.rm = T)
+maxY <- 1.1*max(dfPlot$tSNE_2, na.rm = T)
+minY <- 1.1*min(dfPlot$tSNE_2, na.rm = T)            
+
+#library(scales)
+#clusterCols = hue_pal()(length(clusterVec))
+#dfPlot$Cluster <- factor(dfPlot$Cluster, levels = clusterVec)
+
+# dotsize  = 1.5
+# if (nrow(dfPlot) > 10000){
+#   dotsize  = 0.75
+# } else if (nrow(dfPlot) > 50000){
+#   dotsize = 0.5
+# } else {
+#   dotsize = 0.25
+# }
+
+plotList[[tag]] <- ggplot(data=dfPlot[dfPlot$included == "+",], aes(tSNE_1, tSNE_2, color=Phase)
+            ) + geom_point( shape=16, size = as.numeric(dotsize)
+            ) + xlab("tSNE1") + ylab("tSNE2"
+            ) + theme_bw(
+            )  +  theme(
+                axis.text.y   = element_text(size=8),
+                axis.text.x   = element_text(size=8),
+                axis.title.y  = element_text(size=8),
+                axis.title.x  = element_text(size=8),
+                axis.line = element_line(colour = "black"),
+                panel.border = element_rect(colour = "black", fill=NA, size=1),
+                plot.title = element_text(hjust = 0.5, size = 12),
+                legend.title = element_blank()
+            ) + guides(col = guide_legend(override.aes = list(shape = 16, size = legendDotSize))
+            ) + ggtitle(paste0("Sample: ", tag)
+            ) + xlim(minX, maxX) + ylim(minY, maxY
+            ) + coord_fixed(ratio=1
+            ) 
+            
+if (length(unique(dfPlot$Cluster)) > 15){
+   plotList[[tag]] <- plotList[[tag]] + theme(legend.position = "none")
+}
+            FNbase <- paste0(tag, VersionPdfExt)
+            FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+            FNrel <- paste0("report_figures/", FNbase)
+            
+            pdf(FN)
+                print(plotList[[tag]])
+            dev.off()
+            
+            if (exists("shinyURL") & !is.null(shinyURL)){
+            link <- paste0(
+              'An interactive version of this figure with additional viewing options can be found <a href="',shinyURL,'?_inputs_&y_axis=%22tSNE_2%22&x_axis=%22tSNE_1%22&colorBy=%22Phase%22&splitByColumn=%22all%22" target="_blank">here</a>. '
+            )
+            
+            } else {
+              link <- ""
+            }
+            
+            figLegend <- paste0(
+                '**Figure ', 
+                figureCount, 
+                ':** ',
+                ' tSNE showing all cells from all samples together. The esimated cell-cycle phase is color coded. Download a pdf of this figure <a href="',FNrel,'" target="_blank">here</a>. ',
+                link
+            )
+            
+            figureCount <- figureCount + 1
+            
+            NewChnk <- paste0(
+                "#### ", tag,
+                "\n```{r CC_tSNE_",
+                tag,", results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",
+                figLegend,"'}\n",
+                "\n",
+                "\n print(plotList[['",tag,"']])",
+                "\n cat(  '\n')",
+                "\n\n\n```\n"   
+            )
+            
+            chnkVec <- c(
+                chnkVec,
+                NewChnk
+            )
+
+
+## Done first tsne all samples                                               ##
+###############################################################################            
+###############################################################################
+## Make one UMAP plot per sample                                             ##
+
+sampleVec <- sort(unique(OsC@meta.data$sampleID))
+
+dfPlot <- OsC@meta.data
+pos <- grep("included", names(dfPlot))
+if (length(pos) == 0){
+  dfPlot[["included"]] <- "+"
+}
+dfPlot[["cellID"]] <- row.names(dfPlot)
+            
+## Get UMAP coordinates ##
+coord <- data.frame(OsC@reductions$umap@cell.embeddings)
+coord[["cellID"]] <- row.names(coord)
+coord <-coord[coord$cellID %in% dfPlot$cellID, ]
+dfPlot$UMAP_1 <- NULL
+dfPlot$UMAP_2 <- NULL
+            
+dfPlot <- merge(dfPlot, coord, by.x = "cellID", by.y="cellID", all=T)
+dfPlot[is.na(dfPlot)] <- 0
+dfPlot <- dfPlot[dfPlot$UMAP_1 != 0 & dfPlot$UMAP_2 != 0,]
+            
+            
+## Add cluster colors ##
+#dfPlot[["Cluster"]] <- paste0("C", dfPlot$seurat_clusters)
+#clusterVec <- as.vector(paste0("C", unique(sort(dfPlot$seurat_clusters))))
+            
+#library(scales)
+#clusterCols = hue_pal()(length(clusterVec))
+            
+#dfPlot$Cluster <- factor(dfPlot$Cluster, levels = clusterVec)            
+            
+maxX <- 1.1*max(dfPlot$UMAP_1, na.rm = T)
+minX <- 1.1*min(dfPlot$UMAP_1, na.rm = T)
+maxY <- 1.1*max(dfPlot$UMAP_2, na.rm = T)
+minY <- 1.1*min(dfPlot$UMAP_2, na.rm = T)               
+                                   
+for (i in 1:length(sampleVec)){
+    tag <- paste0("UMAP_CC_plot_by_", sampleVec[i])
+    
+    dfPlotSel <- dfPlot[dfPlot$sampleID == sampleVec[i], ]
+            
+            
+            
+    plotList[[tag]] <- ggplot(data=dfPlotSel[dfPlot$included == "+",], aes(UMAP_1, UMAP_2, color=Phase)
+            ) + geom_point( shape=16, size = as.numeric(dotsize)
+            ) + xlab("UMAP1") + ylab("UMAP2"
+            ) + theme_bw(
+            )  +  theme(
+                axis.text.y   = element_text(size=8),
+                axis.text.x   = element_text(size=8),
+                axis.title.y  = element_text(size=8),
+                axis.title.x  = element_text(size=8),
+                axis.line = element_line(colour = "black"),
+                panel.border = element_rect(colour = "black", fill=NA, size=1),
+                plot.title = element_text(hjust = 0.5, size = 12),
+                legend.title = element_blank()
+            ) + guides(col = guide_legend(override.aes = list(shape = 16, size = legendDotSize))
+            ) + ggtitle(paste0("Sample: ", tag)
+            ) + xlim(minX, maxX) + ylim(minY, maxY
+            ) + coord_fixed(ratio=1
+            ) 
+    
+    if (length(unique(dfPlot$Cluster)) > 15){
+   plotList[[tag]] <- plotList[[tag]] + theme(legend.position = "none")
+}
+            
+            FNbase <- paste0(tag, VersionPdfExt)
+            FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+            FNrel <- paste0("report_figures/", FNbase)
+            
+            pdf(FN)
+                print(plotList[[tag]])
+            dev.off()
+            
+            if (exists("shinyURL") & !is.null(shinyURL)){
+            link <- paste0(
+              'An interactive version of this figure with additional viewing options can be found <a href="',shinyURL,'?_inputs_&y_axis=%22UMAP_2%22&x_axis=%22UMAP_1%22&colorBy=%22Phase%22&splitByColumn=%22sampleName%22" target="_blank">here</a>. '
+            )
+            
+            } else {
+              link <- ""
+            }
+            
+            figLegend <- paste0(
+                '**Figure ', 
+                figureCount, 
+                ':** ',
+                ' Sample-level UMAPs. Estimated cell-cylce phase color-coded. Download a pdf of this figure <a href="',FNrel,'" target="_blank">here</a>. ',
+                link
+            )
+            
+            figureCount <- figureCount + 1
+            
+            NewChnk <- paste0(
+                paste("#### ", tag),
+                "\n```{r CC_UMAP_",
+                tag,", results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",
+                figLegend,"'}\n",
+                "\n",
+                "\n print(plotList[['",tag,"']])",
+                "\n cat(  '\n')",
+                "\n\n\n```\n"   
+            )
+            
+            chnkVec <- c(
+                chnkVec,
+                NewChnk
+            )
+            
+            
+    
+    
+    
+    
+}
+
+## Done making one umap plot per sample                                      ##
+###############################################################################
+
+
+###############################################################################
+## Add cluster dendrogram by sample                                          ##
+
+if (length(unique(OsC@meta.data$sampleID)) > 3){
+  library(ggtree)
+  Idents(OsC) <- "sampleName"
+  OsC <- BuildClusterTree(OsC)
+      
+  tag <- paste0("Sample_Dendrogram")
+      
+  OsC@tools$BuildClusterTree$tip.label <- paste0( OsC@tools$BuildClusterTree$tip.label)
+      
+  plotList[[tag]]  <- ggplot(OsC@tools$BuildClusterTree
+      ) + geom_tree(
+      ) + theme_tree(
+      ) 
+  h <- sum(c("sampleName", "sampleColor") %in% OsC@meta.data)
+  if (h ==2){
+    dfCol <- unique(OsC@meta.data[,c("sampleName", "sampleColor")])
+    colVec <- as.vector(dfCol$sampleColor)
+    names(colVec) <- as.vector(dfCol$sampleName)
+    plotList[[tag]] <- plotList[[tag]] + geom_tiplab(color=colVec
+      ) 
+  } else {
+    plotList[[tag]] <- plotList[[tag]] + geom_tiplab(
+      )   
+  }
+  
+  
+  plotList[[tag]] <- plotList[[tag]] + labs(title=tag
+      ) + theme(
+        panel.border = element_rect(colour = "black", fill=NA, size=1),
+        axis.title.x=element_blank(),
+        plot.title = element_text(hjust = 0.5, size = 12)
+      )  + xlim(0,dendrofactor*max(OsC@tools$BuildClusterTree[[2]]))
+ 
+      
+  ## Save to file ##
+  FNbase <- paste0(tag,".", VersionPdfExt)
+  FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+  FNrel <- paste0("report_figures/", FNbase)
+      
+  pdf(FN)
+      print(plotList[[tag]])
+  dev.off()
+      
+  figLegend <- paste0(
+      '**Figure ', 
+          figureCount, 
+          ':** ',
+          ' Clusterplot dendrogram by sample ID. ','A pdf of this figure can be downloaded <a href="',FNrel,'", target="_blank>here</a>.'
+      )
+      
+      
+      NewChnk <- paste0(
+          "#### SampleID Dendrogram",
+          "\n```{r ", tag, "results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",
+          figLegend,"'}\n",
+          "\n",
+          "\n print(plotList[['",tag,"']])",
+          "\n cat(  '\n')",
+          "\n\n\n```\n"   
+      )
+      
+      chnkVec <- c(
+          chnkVec,
+          NewChnk
+      )
+      
+      
+      figureCount <- figureCount + 1
+}
+
+## Done by sample                                                            ##
+###############################################################################
+            
+###############################################################################
+## Add cluster dendrogram by cluster                                         ##
+library(ggtree)
+Idents(OsC) <- "clusterName"
+OsC <- BuildClusterTree(OsC)
+    
+tag <- paste0("Cluster_Dendrogram")
+    
+OsC@tools$BuildClusterTree$tip.label <- paste0("C", OsC@tools$BuildClusterTree$tip.label)
+    
+plotList[[tag]]  <- ggplot(OsC@tools$BuildClusterTree
+    ) + geom_tree(
+    ) + theme_tree(
+    ) 
+
+h <- sum(c("clusterName", "clusterColor") %in% names(OsC@meta.data))
+if (h ==2){
+    dfCol <- unique(OsC@meta.data[,c("clusterName", "clusterColor")])
+    colVec <- as.vector(dfCol$clusterColor)
+    names(colVec) <- as.vector(dfCol$clusterName)
+    plotList[[tag]] <- plotList[[tag]] + geom_tiplab(color=colVec
+    ) 
+} else {
+    plotList[[tag]] <- plotList[[tag]] + geom_tiplab(
+    )   
+}
+
+
+
+plotList[[tag]] <- plotList[[tag]] + labs(title=tag
+    ) + theme(
+      panel.border = element_rect(colour = "black", fill=NA, size=1),
+      axis.title.x=element_blank(),
+      plot.title = element_text(hjust = 0.5, size = 12)
+    )  + xlim(0,dendrofactor*max(OsC@tools$BuildClusterTree[[2]]))
+    
+    #+ xlim(-1,1.2*max(OsC@tools$BuildClusterTree$edge)) 
+    
+    
+## Save to file ##
+FNbase <- paste0(tag,".", VersionPdfExt)
+FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+FNrel <- paste0("report_figures/", FNbase)
+    
+pdf(FN)
+    print(plotList[[tag]])
+dev.off()
+    
+figLegend <- paste0(
+    '**Figure ', 
+        figureCount, 
+        ':** ',
+        ' Clusterplot dendrogram. ','A pdf of this figure can be downloaded <a href="',FNrel,'" target="_blank">here</a>.'
+    )
+    
+    
+    NewChnk <- paste0(
+        "#### Cluster Dendrogram",
+        "\n```{r ", tag, "results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",
+        figLegend,"'}\n",
+        "\n",
+        "\n print(plotList[['",tag,"']])",
+        "\n cat(  '\n')",
+        "\n\n\n```\n"   
+    )
+    
+    chnkVec <- c(
+        chnkVec,
+        NewChnk
+    )
+    
+    
+    figureCount <- figureCount + 1
+
+## Done integraed analysis                                                   ##
+###############################################################################
+
+if (length(plotList) > 3){
+    tabVar <- ".tabset .tabset-fade .tabset-dropdown"
+} else {
+    tabVar <- ".tabset .tabset-fade .tabset-pills"
+}
+
+
+```
+
+### Cell Cycle Markers {`r tabVar`}
+
+```{r Plot_dim_red_by_cell_cycle_phase, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"} 
+
+cat(paste(knit(text = chnkVec, quiet = T), collapse = '\n'))
+
+```

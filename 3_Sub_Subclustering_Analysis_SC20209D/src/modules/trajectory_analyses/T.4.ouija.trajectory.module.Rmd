@@ -1,0 +1,726 @@
+<!-- Set Parameters Module -->
+<!-- Set the chnkPrefix to make all chunks unique in the overall folder -->
+```{r partT_ouija_init, echo=TRUE, eval=TRUE, warning=FALSE}
+chnkPrefix <- "T4.ouija."
+VersionPdfExt <- VersionPdfExt <- paste0(".",chnkPrefix,"V", gsub("-", "", Sys.Date()), ".pdf")
+
+Sys.setenv(DOWNLOAD_STATIC_LIBV8 = 1)
+#renv::install("V8")
+renv::install("kieranrcampbell/ouija")
+
+invertOuijaPseudotime <- TRUE
+useCachedOuijaObject <- TRUE
+
+```
+
+
+
+```{r ouija_genes, eval=TRUE, echo=F, results=F}
+
+earlySwitch <- c("VCAM1", "CTGF", "THY1", "IGFBP4")
+earlySwitch <- earlySwitch[earlySwitch %in% row.names(OsC)]
+
+lateSwitch <- c("HOPX", "IVL", "FLG", "SPINK5")
+lateSwitch <- lateSwitch[lateSwitch %in% row.names(OsC)]
+
+transient <- c("CDH1", "EPCAM", "CLDN7")
+transient <- transient[transient %in% row.names(OsC)]
+
+
+response_type <- c(
+    rep("switch", length(earlySwitch) + length(lateSwitch)), 
+    rep("transient", length(transient))
+)
+
+allMarkers <- unique(
+    c(
+        earlySwitch,
+        lateSwitch,
+        transient
+    )
+)
+
+## prepare matrix ##
+OsC_subL1 <- OsC
+OsC_subL1 <- subset(OsC_subL1, features = allMarkers)
+dfMat <- data.matrix(OsC_subL1@assays[["RNA"]]@data)
+dfTmat <- data.matrix(t(dfMat))
+#dfTmat <- dfTmat[sample(row.names(dfTmat), 5000),]
+
+## Make sure no row has zero counts ##
+selVec  <- (colSums(dfTmat) > 0)
+dfTmat <- dfTmat[,selVec]
+response_type <- response_type[selVec]
+
+
+
+# library(rslurm)
+# sjob <- slurm_apply(test_func, pars, jobname = 'test_apply',
+#                     nodes = 2, cpus_per_node = 2, submit = FALSE)
+
+pos <- grep(".Ouija.Robj", list.files(tempWorkDir))
+objectLoaded <- FALSE
+
+options(mc.cores = parallel::detectCores())
+
+
+if (length(pos) == 1 && useCachedOuijaObject){
+    OuijaFN <- paste0(
+        tempWorkDir, "/", 
+        list.files(tempWorkDir)[grep(".Ouija.Robj", list.files(tempWorkDir))]
+    )
+    load(OuijaFN)
+    objectLoaded <- TRUE
+}
+
+if (!objectLoaded) {
+    nIter = 500
+    ouija.mode <- "vb"
+    oui <- ouija::ouija(
+        dfTmat, 
+        response_type, 
+        inference_type = ouija.mode,  # is orders of magnitude faster than hmc
+        iter = nIter # ideal 4000
+    )
+    
+    OuijaFN <- paste0(Obio@parameterList$project_id, "_nIter", nIter, "_mode_", ouija.mode, "Ouija.Robj")
+    save(oui, 
+        file = paste0(
+            Obio@parameterList$localWorkDir,
+            Obio@parameterList$project_id,
+            "_nIter", nIter, "_mode_", ouija.mode, "Ouija.Robj"
+        )
+    )
+}
+
+
+
+
+Ouija_Pseudotime <- ouija::map_pseudotime(oui)
+
+if (invertOuijaPseudotime){
+    Ouija_Pseudotime <- (1 - Ouija_Pseudotime)
+}
+
+Ouija_Switchtime <- ouija::switch_times(oui) # MAP switch times
+Ouija_Peaktime <- ouija::peak_times(oui) # MAP peak times
+Ouija_SwitchStrength <-  ouija::switch_strengths(oui) # MAP switch strengths
+
+dfRes <- data.frame(
+    cellID = row.names(dfTmat),
+    Ouija_Pseudotime
+)
+
+row.names(dfRes) <- dfRes$cellID
+dfRes$cellID <- NULL
+
+OsC <- biologicToolsSC::addDf2seuratMetaData(
+    OsC, 
+    dfRes
+)
+
+save(OsC,
+    file = paste0(
+         Obio@parameterList$localWorkDir,
+         Obio@parameterList$project_id,
+        ".Seurat.Robj"
+     )
+)
+
+
+###############################################################################
+## Gene Regs Table                                                           ##
+
+gene_regs <- ouija::gene_regulation(oui)
+#head(gene_regs)
+
+##                                                                           ##
+###############################################################################
+
+###############################################################################
+## Init Plot Collection                                                      ##
+
+plotList <- list()
+chnkVec <- as.vector(NULL, mode = "character")
+
+## Done                                                                      ##
+###############################################################################
+
+
+###############################################################################
+## Diagnostic plot 1                                                         ##
+# We can plot the gene expression over pseudotime along with the maximum a posteriori (MAP) estimates of the mean function (the sigmoid or Gaussian transient function) using the plot_expression function:
+
+tag <- "Ouija_Expression"
+
+plotList[[tag]] <- ouija::plot_expression(oui) + ggplot2::theme_bw(
+    ) +  ggplot2::theme(
+         axis.text.y   = ggplot2::element_text(size=8),
+         axis.text.x   = ggplot2::element_text(size=8),
+         axis.title.y  = ggplot2::element_text(size=8),
+         axis.title.x  = ggplot2::element_text(size=8),
+         axis.line = ggplot2::element_line(colour = "black"),
+         panel.border = ggplot2::element_rect(colour = "black", fill=NA, size=1),
+         plot.title = ggplot2::element_text(hjust = 0.5, size = 12)
+    )
+
+
+## Save to file ##
+FNbase <- paste0(tag, VersionPdfExt)
+FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+FNrel <- paste0("report_figures/", FNbase)
+
+
+pdf(FN)
+    print(plotList[[tag]])
+dev.off()
+
+
+
+## Create R markdown chunk ##
+figLegend <- paste0(
+    '**Figure ', 
+    figureCount, 
+    '**: We can plot the gene expression over pseudotime along with the maximum a posteriori (MAP) estimates of the mean function (the sigmoid or Gaussian transient function)',
+    '. Download a pdf of this figure <a href="',FNrel,'" target="_blank">here</a>. '
+)
+figureCount <- figureCount + 1 
+
+NewChnk <- paste0(
+    "\n#### ", tag, 
+    "\n```{r ", tag, ", results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",
+    figLegend,"'}\n",
+    "\n",
+    "\n print(plotList[['",tag,"']])",
+    "\n cat(  '\n')",
+    "\n\n\n```\n"   
+)
+
+chnkVec <- c(
+    chnkVec,
+    NewChnk
+)
+
+
+
+##                                                                           ##
+###############################################################################
+
+###############################################################################
+## Diagnostic plot 2                                                         ##
+# We can plot the gene expression over pseudotime along with the maximum a posteriori (MAP) estimates of the mean function (the sigmoid or Gaussian transient function) using the plot_expression function:
+
+# tag <- "Ouija_Diagnostic"
+# 
+# plotList[[tag]] <- ouija::plot_diagnostics(oui) + ggplot2::theme_bw(
+#     ) +  ggplot2::theme(
+#          axis.text.y   = ggplot2::element_text(size=8),
+#          axis.text.x   = ggplot2::element_text(size=8),
+#          axis.title.y  = ggplot2::element_text(size=8),
+#          axis.title.x  = ggplot2::element_text(size=8),
+#          axis.line = ggplot2::element_line(colour = "black"),
+#          panel.border = ggplot2::element_rect(colour = "black", fill=NA, size=1),
+#          plot.title = ggplot2::element_text(hjust = 0.5, size = 12)
+#     )
+# 
+# 
+# ## Save to file ##
+# FNbase <- paste0(tag, VersionPdfExt)
+# FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+# FNrel <- paste0("report_figures/", FNbase)
+# 
+# 
+# pdf(FN)
+#     print(plotList[[tag]])
+# dev.off()
+# 
+# 
+# 
+# ## Create R markdown chunk ##
+# figLegend <- paste0(
+#     '**Figure ', 
+#     figureCount, 
+#     '**: It’s good practice to look at the trace and aurocorrelation of the (log)-likelihood to make sure the distribution has (roughly) converged.'
+# )
+# figureCount <- figureCount + 1 
+# 
+# NewChnk <- paste0(
+#     "\n#### ", tag, 
+#     "\n```{r ", tag, ", results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",
+#     figLegend,"'}\n",
+#     "\n",
+#     "\n print(plotList[['",tag,"']])",
+#     "\n cat(  '\n')",
+#     "\n\n\n```\n"   
+# )
+# 
+# chnkVec <- c(
+#     chnkVec,
+#     NewChnk
+# )
+
+
+
+##                                                                           ##
+###############################################################################
+
+###############################################################################
+## Diagnostic plot 3                                                         ##
+# We can also visualise when in the trajectory gene regulation behaviour occurs, either in the form of the switch time or the peak time (for switch-like or transient genes) using the plot_switch_times and plot_transient_times functions:
+
+tag <- "Ouija_Switch_Times"
+
+plotList[[tag]] <- ouija::plot_switch_times(oui) + ggplot2::theme_bw(
+    ) +  ggplot2::theme(
+         axis.text.y   = ggplot2::element_text(size=8),
+         axis.text.x   = ggplot2::element_text(size=8),
+         axis.title.y  = ggplot2::element_text(size=8),
+         axis.title.x  = ggplot2::element_text(size=8),
+         axis.line = ggplot2::element_line(colour = "black"),
+         panel.border = ggplot2::element_rect(colour = "black", fill=NA, size=1),
+         plot.title = ggplot2::element_text(hjust = 0.5, size = 12)
+    )
+
+
+## Save to file ##
+FNbase <- paste0(tag, VersionPdfExt)
+FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+FNrel <- paste0("report_figures/", FNbase)
+
+
+pdf(FN)
+    print(plotList[[tag]])
+dev.off()
+
+
+
+## Create R markdown chunk ##
+figLegend <- paste0(
+    '**Figure ', 
+    figureCount, 
+    '**: We can also visualise when in the trajectory gene regulation behaviour occurs, either in the form of the switch time or the peak time (for switch-like or transient genes).',
+    '. Download a pdf of this figure <a href="',FNrel,'" target="_blank">here</a>. '
+)
+figureCount <- figureCount + 1 
+
+NewChnk <- paste0(
+    "\n#### ", tag, 
+    "\n```{r ", tag, ", results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",
+    figLegend,"'}\n",
+    "\n",
+    "\n print(plotList[['",tag,"']])",
+    "\n cat(  '\n')",
+    "\n\n\n```\n"   
+)
+
+chnkVec <- c(
+    chnkVec,
+    NewChnk
+)
+
+
+
+##                                                                           ##
+###############################################################################
+
+
+###############################################################################
+## Diagnostic plot 4                                                         ##
+# We can also visualise when in the trajectory gene regulation behaviour occurs, either in the form of the switch time or the peak time (for switch-like or transient genes) using the plot_switch_times and plot_transient_times functions:
+
+tag <- "Ouija_Peak_Times"
+
+plotList[[tag]] <- ouija::plot_peak_times(oui) + ggplot2::theme_bw(
+    ) +  ggplot2::theme(
+         axis.text.y   = ggplot2::element_text(size=8),
+         axis.text.x   = ggplot2::element_text(size=8),
+         axis.title.y  = ggplot2::element_text(size=8),
+         axis.title.x  = ggplot2::element_text(size=8),
+         axis.line = ggplot2::element_line(colour = "black"),
+         panel.border = ggplot2::element_rect(colour = "black", fill=NA, size=1),
+         plot.title = ggplot2::element_text(hjust = 0.5, size = 12)
+    )
+
+
+## Save to file ##
+FNbase <- paste0(tag, VersionPdfExt)
+FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+FNrel <- paste0("report_figures/", FNbase)
+
+
+pdf(FN)
+    print(plotList[[tag]])
+dev.off()
+
+
+
+## Create R markdown chunk ##
+figLegend <- paste0(
+    '**Figure ', 
+    figureCount, 
+    '**: We can also visualise when in the trajectory gene regulation behaviour occurs, either in the form of the switch time or the peak time (for switch-like or transient genes).',
+    '. Download a pdf of this figure <a href="',FNrel,'" target="_blank">here</a>. '
+)
+figureCount <- figureCount + 1 
+
+NewChnk <- paste0(
+    "\n#### ", tag, 
+    "\n```{r ", tag, ", results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",
+    figLegend,"'}\n",
+    "\n",
+    "\n print(plotList[['",tag,"']])",
+    "\n cat(  '\n')",
+    "\n\n\n```\n"   
+)
+
+chnkVec <- c(
+    chnkVec,
+    NewChnk
+)
+
+
+
+##                                                                           ##
+###############################################################################
+
+
+###############################################################################
+##                                                                           ##
+# This step consumes a lot of time
+# cmo <- consistency_matrix(oui)
+
+# pdf("../temp4.consistency.matrix.pdf")
+# plot_consistency(oui)
+# dev.off()
+##                                                                           ##
+## cell_classifications <- cluster_consistency(cmo)
+# map_pst <- map_pseudotime(oui)
+# df_class <- data.frame(map_pst, cell_classifications)
+# 
+# pdf("../temp5.cell.classifications.pdf")
+# ggplot(df_class, aes(x = map_pst, y = cell_classifications)) +
+#   geom_point() +
+#   xlab("MAP pseudotime") +
+#   ylab("Cell classification")
+# dev.off()
+###############################################################################
+if (length(plotList) > 3){
+    tabVar <- ".tabset .tabset-fade .tabset-dropdown"
+} else {
+    tabVar <- ".tabset .tabset-fade .tabset-pills"
+}
+
+```
+
+
+### Ouija Trajectory Inference {`r tabVar`}
+In this section trajectory analysis using the Ouija method are presented.  
+
+```{r Ouija_main, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"} 
+
+cat(paste(knitr::knit(text = chnkVec, quiet = T), collapse = '\n'))
+
+``` 
+
+
+```{r ouija_heatmaps_part1, eval=TRUE, echo=F, results=F}
+if (length(plotList) > 3){
+    tabVar <- ".tabset .tabset-fade .tabset-dropdown"
+} else {
+    tabVar <- ".tabset .tabset-fade .tabset-pills"
+}
+
+###############################################################################
+## Find most variable genes in trajectory                                    ##
+
+pseudotimeLineageName <- "Ouija_Pseudotime"
+plotTopNgenes <- 100
+
+Y <- data.matrix( OsC@assays[["RNA"]]@data)
+        
+Y <-  Y[OsC@assays$integrated@var.features,]
+        
+t <- OsC@meta.data[,pseudotimeLineageName]
+        
+# Fit GAM for each gene using pseudotime as independent variable.
+        
+gam.pval <- apply(Y, 1, function(z){
+    d <- data.frame(z=z, t=t)
+    tmp <- gam::gam(z ~ gam::lo(t), data=d)
+    p <- summary(tmp)[4][[1]][1,5]
+    p
+})
+
+
+gam.pval <- sort(gam.pval, decreasing = FALSE)
+gam.pval <- gam.pval[gam.pval < 0.01]
+gam.pval <- sort(gam.pval, decreasing=FALSE)
+
+
+display.gam.pval <- -1*log10(gam.pval)
+maxVal <- max(display.gam.pval[display.gam.pval < Inf])
+display.gam.pval[display.gam.pval == Inf] <- maxVal
+
+topgenes <- names(gam.pval)[1:plotTopNgenes]
+
+heatmapGeneList <- list(
+    "Top_Pseudotime_Variable_Genes" = topgenes
+)
+
+
+###################
+## Make Table
+
+dfOut <- data.frame(gene=names(gam.pval), time_variability_gam_lg10_p_value=display.gam.pval)
+dfOut[["Most_time_variable_genes"]] <- ""
+dfOut[dfOut$gene %in% topgenes, "Most_time_variable_genes"] <- "+"
+
+## Done
+####################
+
+pos <- grep("TFs", names(Obio@dataTableList$referenceList))
+
+if (length(pos > 0)){
+    topgenes.TF <- names(sort(gam.pval, decreasing = FALSE))[names(sort(gam.pval, decreasing = FALSE)) %in% Obio@dataTableList[["referenceList"]]$TFs]
+    topgenes.TF <- topgenes.TF[1:plotTopNgenes]
+    heatmapGeneList[["Top_Pseudotime_Variable_Transcription_Factors"]] <- topgenes.TF
+    dfOut[["Most_time_variable_TFs"]] <- ""
+    dfOut[dfOut$gene %in% topgenes.TF, "Most_time_variable_TFs"] <- "+"
+
+} else {
+    topgenes.TF <- 0
+}
+
+#########################################
+## Add average expression column
+
+###############################################################################
+## Add percentage expressed genes                                            ##
+DefaultAssay(OsC) <- "RNA"
+my_genes <- rownames(x = OsC@assays$RNA)
+
+exp <- FetchData(OsC, my_genes)
+
+ExprMatrix <- round(as.matrix(colMeans(exp  > 0)) *100,1)
+colnames(ExprMatrix)[1] <- "Percent_cells_expressing"
+dfExprMatrix <- data.frame(ExprMatrix)
+dfExprMatrix[["gene"]] <- row.names(dfExprMatrix)
+
+dfExprMatrix <- dfExprMatrix[dfExprMatrix$gene %in% dfOut$gene, ]
+
+dfOut <- dplyr::full_join(
+    dfOut,
+    dfExprMatrix,
+    by="gene"
+)
+
+dfOutDisplay <- dfOut[dfOut$Percent_cells_expressing >= 10, ]
+
+##
+#########################################
+
+#########################################
+## Write to Excel 
+if (!dir.exists(Obio@parameterList[["reportTableDir"]])){
+  dir.create(Obio@parameterList[["reportTableDir"]])
+}
+
+baseFN <- paste0(
+   Obio@parameterList$project_id, 
+   ".Lineage1.variability.table.xlsx"
+)
+
+
+outPutFN <- paste0(
+     Obio@parameterList$reportTableDir,
+     baseFN
+)
+  
+ 
+FNrel <- paste0("report_tables/", baseFN)
+
+wb <- openxlsx::createWorkbook()
+
+hs1 <- openxlsx::createStyle(
+    fontColour = "#ffffff",
+    fgFill = "#000000",
+    halign = "CENTER",
+    textDecoration = "Bold"
+)
+sheetName <- substr("Lineage_1",1,30)
+  
+openxlsx::addWorksheet(
+    wb, 
+    sheetName = sheetName
+)
+  
+openxlsx::freezePane(wb, sheetName ,  firstActiveRow = 2)
+sheetN=1
+openxlsx::writeData(wb, sheetN, dfOut, startRow = 1, startCol = 1, headerStyle = hs1)
+openxlsx::saveWorkbook(
+  wb, 
+  outPutFN , 
+  overwrite = TRUE
+)
+
+## Create table download option ##
+#FNbase <- paste0(Obio@parameterList$project_id, "_Pseudotime_Variable_Genes.xlsx")
+#FN <- paste0(Obio@parameterList$reportTableDir, FNbase)
+#FNrel <- paste0("report_tables/", FNbase)
+tabDownloadLink <- paste0("This table list all potentially time-variable genes in this trajectory [here](",FNrel,")")
+tabLegend = paste0(
+    "**Table: ** Time-variable genes in this trajectory. ",
+    tabDownloadLink
+)
+chnkVec <- paste0(
+        #"#### ", names(dtList),
+        "\n```{r PT_var_datatable, results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",
+        tabLegend,"'}\n",
+        "\n",
+        "\n DT::datatable(dfOutDisplay,rownames = FALSE,  escape = FALSE)",
+        "\n cat(  '\n')",
+        "\n\n\n```\n"   
+    )
+tabVar <- "### Table Time-variable Genes"
+
+
+
+##
+###############################################################################
+```
+
+`r tabVar`
+```{r render_QCTable, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"}
+    cat(paste(knitr::knit(text = chnkVec, quiet = T), collapse = '\n'))
+```
+
+
+```{r ouija_heatmaps_part2, eval=TRUE, echo=F, results=F}
+
+
+###############################################################################
+## Init Plot Collection                                                      ##
+
+plotList <- list()
+chnkVec <- as.vector(NULL, mode = "character")
+
+## Done                                                                      ##
+###############################################################################
+
+for (i in 1:length(heatmapGeneList)){
+    ## Relative Heatmap
+    tag <- paste0(names(heatmapGeneList)[i], "_relative")
+    plotList[[tag]] <- createLineageHeatmap(
+    OsC,  
+    lineageSelection = NULL,
+    pseudotimeLineageName = "Ouija_Pseudotime",
+    heatmapGeneVec = heatmapGeneList[[i]],
+    clusterRows = TRUE
+    )
+ 
+    ## Save to file ##
+    FNbase <- paste0(tag, VersionPdfExt)
+    FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+    FNrel <- paste0("report_figures/", FNbase)
+    
+    
+    pdf(FN)
+        print(plotList[[tag]])
+    dev.off()
+    
+    
+    
+    ## Create R markdown chunk ##
+    figLegend <- paste0(
+        '**Figure ', 
+        figureCount, 
+        '**: Heatmap (relative values) ',tag,
+        '. Download a pdf of this figure <a href="',FNrel,'" target="_blank">here</a>. '
+    )
+    figureCount <- figureCount + 1 
+    
+    NewChnk <- paste0(
+        "\n#### ", tag, 
+        "\n```{r ", tag, ", results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",
+        figLegend,"'}\n",
+        "\n",
+        "\n print(plotList[['",tag,"']])",
+        "\n cat(  '\n')",
+        "\n\n\n```\n"   
+    )
+    
+    chnkVec <- c(
+        chnkVec,
+        NewChnk
+    )
+    
+    ## Absolute Heatmap
+    tag <- paste0(names(heatmapGeneList)[i], "_absolute")
+    plotList[[tag]] <- createLineageHeatmap(
+        OsC,  
+        lineageSelection = NULL,
+        pseudotimeLineageName = "Ouija_Pseudotime",
+        heatmapGeneVec = heatmapGeneList[[i]],
+        clusterRows = TRUE,
+        #plotTopNgenes = 100,
+        plotAbsoluteValues = TRUE,  # otherwise: relative
+        highColor = "#00008B",
+        #midColor = "#fffbbc",
+        lowColor = "#d3d3d3"
+    )
+ 
+    ## Save to file ##
+    FNbase <- paste0(tag, VersionPdfExt)
+    FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+    FNrel <- paste0("report_figures/", FNbase)
+    
+    
+    pdf(FN)
+        print(plotList[[tag]])
+    dev.off()
+    
+    
+    
+    ## Create R markdown chunk ##
+    figLegend <- paste0(
+        '**Figure ', 
+        figureCount, 
+        '**: Heatmap ',tag,
+        '. Download a pdf of this figure <a href="',FNrel,'" target="_blank">here</a>. '
+    )
+    figureCount <- figureCount + 1 
+    
+    NewChnk <- paste0(
+        "\n#### ", tag, 
+        "\n```{r ", tag, ", results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",
+        figLegend,"'}\n",
+        "\n",
+        "\n print(plotList[['",tag,"']])",
+        "\n cat(  '\n')",
+        "\n\n\n```\n"   
+    )
+    
+    chnkVec <- c(
+        chnkVec,
+        NewChnk
+    )
+    
+    
+    ## Done                                                                      ##
+    ###############################################################################
+}
+
+if (length(plotList) > 3){
+    tabVar <- ".tabset .tabset-fade .tabset-dropdown"
+} else {
+    tabVar <- ".tabset .tabset-fade .tabset-pills"
+}
+
+```
+
+### Ouija Heatmaps {`r tabVar`}
+```{r Ouija_hm_main, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"} 
+
+cat(paste(knitr::knit(text = chnkVec, quiet = T), collapse = '\n'))
+
+``` 

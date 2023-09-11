@@ -1,0 +1,4 @@
+"sampleID"	"sampleName"	"sampleColor"
+"Biotin24h"	"Biotin24h"	"#F8766D"
+"Biotin7d"	"Biotin7d"	"#00BA38"
+"CXCL13ICPE24h"	"CXCL13ICPE24h"	"#619CFF"

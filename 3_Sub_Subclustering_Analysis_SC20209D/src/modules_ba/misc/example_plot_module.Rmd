@@ -1,0 +1,113 @@
+<!-- Scatterplot Module -->
+<!-- Set the chnkPrefix to make all chunks unique in the overall folder -->
+```{r first_chunk, echo=TRUE, eval=TRUE, warning=FALSE}
+chnkPrefix <- "Scatter_"
+VersionPdfExt <- VersionPdfExt <- paste0(".",chnkPrefix,"V", gsub("-", "", Sys.Date()), ".pdf")
+
+second <- paste0(chnkPrefix,"second")
+
+```
+
+
+```{r scatter_second_chunk, echo=TRUE, eval=TRUE, warning=FALSE}
+
+plotList <- list()
+chnkVec <- as.vector(NULL, mode = "character")
+legendDotSize <- 5
+
+
+cols <- colorRampPalette(RColorBrewer::brewer.pal(8, "Dark2"))(ncol(mtcars))
+
+cols <- scales::hue_pal()(ncol(mtcars))
+
+for (i in 2:ncol(mtcars)){
+    xCol <- colnames(mtcars)[1]
+    yCol <- colnames(mtcars)[i]
+    tag <- paste0(chnkPrefix,"figure_C1_", i)
+    
+    plotList[[tag]] <- ggplot2::ggplot(
+        data=mtcars, 
+        aes_string(x=xCol, y=yCol)
+    ) + geom_point(color=cols[i], fill=cols[i]
+    ) + theme_bw(
+    ) +  theme(
+        axis.text.y   = element_text(size=8),
+        axis.text.x   = element_text(angle = 90, vjust = 0.5, hjust=1, size=8),
+        axis.title.y  = element_text(size=8),
+        axis.title.x  = element_text(size=8),
+        axis.line = element_line(colour = "black"),
+        panel.border = element_rect(colour = "black", fill=NA, size=1),
+        plot.title = element_text(hjust = 0.5, size = 12),
+        legend.position="bottom"
+    ) + guides(col = guide_legend(override.aes = list(shape = 16, size = legendDotSize))    
+    ) + ggtitle(paste0("MT Car Types ", yCol)
+    )
+    
+    ###########################################################################
+    ## Save pdf of this figure                                               ##
+    
+    FNbase <- paste0(tag, VersionPdfExt)
+    FN <- paste0(workdir, "/report_figures/", FNbase)
+    FNrel <- paste0("report_figures/", FNbase)
+            
+    pdf(FN)
+            print(plotList[[tag]])
+    dev.off()
+    
+    ## Done                                                                  ##
+    ###########################################################################
+    
+    ###########################################################################
+    ## Link to interactive figure                                            ##
+    # link <- paste0(
+    #     'An interactive version of this figure can be found ', 
+    #     '<a href="https://url/to/figure/on/the/web" target="_blank">here</a>', 
+    #     '. '
+    # )
+    
+    link <- ""
+    
+    ## Done                                                                  ##
+    ###########################################################################
+    
+    figCap <- paste0(
+        '**Figure ',
+        figureCount,
+        ':** A figure of',xCol,' versus ',yCol,'. ',
+        'Download a pdf of this figure <a href="',FNrel,'" target="_blank">here</a>. ',
+        link
+    )
+    
+    figureCount <- figureCount + 1
+    
+    
+    NewChnk <- paste0(
+        "### ",tag,
+        "\n```{r ",tag,", results='asis', echo=T, eval=TRUE, warning=FALSE, fig.cap='",figCap,"'}\n",
+        "\n",
+        "\n print(plotList[['",tag,"']])",
+        "\n cat(  '\n')",
+        "\n```"   
+    )
+    
+    chnkVec <- c(
+        chnkVec,
+        NewChnk
+    )
+}
+
+if (length(plotList) > 3){
+    tabVar <- ".tabset .tabset-fade .tabset-dropdown"
+} else {
+    tabVar <- ".tabset .tabset-fade .tabset-pills"
+}
+
+```
+
+## Scatterplot Module Example {`r tabVar`}
+In this section an example for the scatterplot module is given.
+
+```{r scatter_final, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"}
+## plot list will be integrated in full figure ##
+cat(paste(knitr::knit(text = chnkVec, quiet = T), collapse = '\n'))
+```

@@ -1,0 +1,127 @@
+<!-- Set PArameters Module -->
+<!-- Set the chnkPrefix to make all chunks unique in the overall folder -->
+```{r partB_doublet_estimates, echo=TRUE, eval=TRUE, warning=FALSE}
+chnkPrefix <- "partB.doublet."
+VersionPdfExt <- VersionPdfExt <- paste0(".",chnkPrefix,"V", gsub("-", "", Sys.Date()), ".pdf")
+
+```
+
+
+
+```{r doublet-data, echo=TRUE, eval=TRUE, warning=FALSE, results=FALSE, message = FALSE}
+
+## Add UMAP coordinates to Metadata ##
+dfAdd <- data.frame(OsC@reductions$umap@cell.embeddings)
+
+OsC <- addDf2seuratMetaData(
+    obj = OsC, 
+    dfAdd = dfAdd
+)
+
+## Add tSNE coordinates to Metadata ##
+dfAdd <- data.frame(OsC@reductions$tsne@cell.embeddings)
+
+OsC <- addDf2seuratMetaData(
+    obj = OsC, 
+    dfAdd = dfAdd
+)
+
+
+plotList <- list()
+chnkVec <- as.vector(NULL, mode = "character")
+dfTemp <- OsC@meta.data
+
+pos <- grep("DF_Classification", names(dfTemp))
+
+if (length(pos) > 0){
+
+  ## First make variation plot for integrated samples, than for all individual samples separately
+  tag <- "Doublet_plot"
+  
+  dfTemp$DF_Classification <- factor(dfTemp$DF_Classification, levels = sort(unique(dfTemp$DF_Classification)))
+  
+  
+  #dotsize <- round(7500/nrow(dfTemp),1)
+  # dotsize <- 0.3
+  
+  colVec <- c("black", "red")
+  names(colVec) <- c("Singlet", "Doublet")
+  
+  colVec <- colVec[unique(dfTemp$DF_Classification)]
+  
+  plotList[[tag]] <- ggplot(dfTemp, aes(UMAP_1, UMAP_2, color=DF_Classification)
+          )+ geom_point( 
+              shape = 16,
+              size = as.numeric(dotsize)
+          ) + xlab("UMAP1") + ylab("UMAP2"
+          ) + theme_bw(
+          )  +  theme(
+              axis.text.y   = element_text(size=8),
+              axis.text.x   = element_text(size=8),
+              axis.title.y  = element_text(size=8),
+              axis.title.x  = element_text(size=8),
+              axis.line = element_line(colour = "black"),
+              panel.border = element_rect(colour = "black", fill=NA, size=1),
+              plot.title = element_text(hjust = 0.5, size = 12)
+          ) + ggtitle("Potential Doublets"
+          ) + scale_color_manual(values=colVec
+          ) 
+  
+  #+ xlim(minX, maxX) + ylim(minY, maxY)  
+      
+      
+      
+              ## Save to file ##
+              FNbase <- paste0("DoubletFinderAll", VersionPdfExt)
+              FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+              FNrel <- paste0("report_figures/", FNbase)
+              
+             
+              pdf(FN)
+              print(plotList[[tag]])
+              dev.off()
+              
+              
+              
+              ## Create R markdown chunk ##
+              figLegend <- paste0(
+                  '**Figure ', 
+                  figureCount, 
+                  '**: Figure depicting the location of potential doublets in PCA components 1 and 2. Download a pdf of this figure <a href="',FNrel,'" target="_blank">here</a>. '
+              )
+              
+              figureCount <- figureCount + 1 
+              
+              NewChnk <- paste0(
+                  "#### Doublets All Timepoints", 
+                  "\n```{r ", tag, ", results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",
+                  figLegend,"'}\n",
+                  "\n",
+                  "\n print(plotList[['",tag,"']])",
+                  "\n cat(  '\n')",
+                  "\n\n\n```\n"   
+              )
+              
+              chnkVec <- c(
+                  chnkVec,
+                  NewChnk
+              )
+}
+
+if (length(plotList) > 3){
+    tabVar <- ".tabset .tabset-fade .tabset-dropdown"
+} else {
+    tabVar <- ".tabset .tabset-fade .tabset-pills"
+}
+```
+
+### Highlight Potential Doublets {`r tabVar`}
+This analyis gives an indication of which cells MIGHT be doublets. Chris McGinnis <a href="https://github.com/chris-mcginnis-ucsf/DoubletFinder" target="_blank">DoubletFinder</a> package is used to identify potential doublets.
+
+
+```{r doublet-plot, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"}
+## plot list will be integrated in full figure ##
+if (length(pos) > 0){
+  cat(paste(knit(text = chnkVec, quiet = T), collapse = '\n'))
+}
+```

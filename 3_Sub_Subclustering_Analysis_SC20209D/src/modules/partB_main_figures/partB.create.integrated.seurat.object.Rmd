@@ -1,0 +1,314 @@
+<!-- Set PArameters Module -->
+<!-- Set the chnkPrefix to make all chunks unique in the overall folder -->
+```{r partB_create_integrated_Seurat_object_init, echo=TRUE, eval=TRUE, warning=FALSE}
+chnkPrefix <- "partB.integrated.seurat.object."
+VersionPdfExt <- VersionPdfExt <- paste0(".",chnkPrefix,"V", gsub("-", "", Sys.Date()), ".pdf")
+
+```
+
+
+### Create Sample List
+```{r partB_create_sample_list, echo=TRUE, eval=TRUE, warning=FALSE, results=F}
+###############################################################################
+## Do percent mt plots                                                       ##
+## Load Seurat Object cretated in part A
+###############################################################################
+## Create sample list filtered on MT and norm_counts_RNA                     ##
+
+if (Obio@parameterList$geneIDcolumn != "mgi_symbol" & Obio@parameterList$geneIDcolumn != "hgnc_symbol") {
+            queryGS <- "hgnc_symbol" 
+        } else {
+            queryGS <- Obio@parameterList$geneIDcolumn
+        }
+
+s.genes <- retrieve.gene.category.from.db(
+                cat_id = "ag_lab_categories__41",
+                password = db.pwd,
+                gene.symbol = queryGS,
+                user = Obio@dbDetailList$db.user,
+                host = Obio@dbDetailList$host
+            )
+
+g2m.genes <- retrieve.gene.category.from.db(
+                cat_id = "ag_lab_categories__42",
+                password = db.pwd,
+                gene.symbol = queryGS,
+                user = Obio@dbDetailList$db.user,
+                host = Obio@dbDetailList$host
+            )
+
+SampleList <- createNormSampleList(
+    obj = Obio,
+    reduce = Obio@parameterList$debugReduce, # Default is NULL
+    vars.to.regress = Obio@parameterList$vars.to.regress,
+    s.genes = NULL,
+    g2m.genes = NULL,
+    annotateCellCyclePhase = F
+)
+
+print(paste0("Cell Recuction: ", Obio@parameterList$debugReduce))
+lapply(SampleList, dim)
+## Done                                                                      ##
+###############################################################################
+
+###############################################################################
+## Add doublet annotation, if present, to meta data                          ##
+
+pos <- grep("DF_resultlist", names(Obio@dataTableList))
+
+if (length(pos) > 0){
+    sampleNames <- names(SampleList)
+    for (i in 1:length(SampleList)){
+        dfAdd <- Obio@dataTableList[["DF_resultlist"]][[sampleNames[i]]]
+        row.names(dfAdd) <- gsub("-1", "",row.names(dfAdd))
+        dfAdd <- dfAdd[row.names(dfAdd) %in% row.names(SampleList[[i]]@meta.data),]
+        
+        SampleList[[i]] <- addDf2seuratMetaData(
+            obj = SampleList[[i]],
+            dfAdd = dfAdd
+        )
+    }
+}
+
+## Done                                                                      ##
+###############################################################################
+
+###############################################################################
+## Integrate Datasets                                                        ##
+
+## Determine k-filter parameter ##
+k.test <- min(as.vector(unlist(lapply(SampleList, ncol))))
+if (k.test < 200){
+    k.filter <- k.test-1
+} else {
+    k.filter <- 200
+}
+
+if (length(SampleList) > 1){
+    if (Obio@parameterList$scIntegrationMethod == "SCT"){
+        
+        if (length(grep("scNintegrationFeatures", names(Obio@parameterList))) == 0){
+            Obio@parameterList$scNintegrationFeatures = 3000
+        }
+        
+        library(future)
+        options(future.globals.maxSize = 14000 * 1024^2)
+        plan("multiprocess", workers = 30)
+        
+        sample.features <- Seurat::SelectIntegrationFeatures(
+            object.list = SampleList, 
+            nfeatures = Obio@parameterList$scNintegrationFeatures
+        )
+        SampleList <- Seurat::PrepSCTIntegration(
+            object.list = SampleList, 
+            anchor.features = sample.features, 
+            verbose = FALSE
+        )
+        
+        sampleAnchors <- Seurat::FindIntegrationAnchors(
+            object.list = SampleList, 
+            normalization.method = "SCT", 
+            anchor.features = sample.features, 
+            verbose = FALSE,
+            k.filter = k.filter
+        )
+        
+        OsC <- Seurat::IntegrateData(
+            anchorset = sampleAnchors, 
+            normalization.method = "SCT", 
+            verbose = FALSE
+        )
+        detach("package:future", unload=TRUE)
+        
+    } else {
+    
+        sampleAnchors <- Seurat::FindIntegrationAnchors(
+            object.list = SampleList, 
+            dims = 1:Obio@parameterList$singleCellSeuratNpcs4PCA,
+            k.filter = k.filter
+        ) 
+
+
+        OsC <- Seurat::IntegrateData(
+            #features.to.integrate = geneIntersectVec,
+            anchorset = sampleAnchors, 
+            dims = 1:Obio@parameterList$singleCellSeuratNpcs4PCA
+        )
+    }
+    Obio@dataTableList$referenceList[["sampleAnchors"]] <- as.vector(sort(sampleAnchors@anchor.features))
+} else {
+    OsC <- SampleList[[1]]
+}
+Idents(OsC) <- "sampleID"
+Idents(OsC) <- factor(Idents(OsC), levels = names(Obio@sampleDetailList))
+#OsC@meta.data$sampleID <- factor(OsC@meta.data$sampleID, levels = names(Obio@sampleDetailList))
+
+OsC@meta.data[["cellID"]] <- row.names(OsC@meta.data)
+
+
+###############################################################################
+## Assign cell cycle phase if it hasn't been done already                    ##
+
+if (length(s.genes) > 3 & length(g2m.genes) > 3){
+    OsC <- Seurat::CellCycleScoring(
+          OsC, 
+          s.features = s.genes, 
+          g2m.features = g2m.genes, 
+          set.ident = TRUE
+    )  
+}
+
+names(OsC@meta.data) <- gsub("\\.", "_",names(OsC@meta.data))
+## Done assigning cell cycle phase                                           ##
+###############################################################################
+
+save(OsC,
+    file = paste0(
+         Obio@parameterList$localWorkDir,
+         Obio@parameterList$project_id,
+        ".Seurat.Robj"
+     )
+)
+
+
+
+print("R bioLOGIC single cell object initialized.")
+
+
+###############################################################################
+## Setting plotting parameters                                               ##
+dotsize  = 1
+if (nrow(OsC@meta.data) > 1000){
+  dotsize  = 0.75
+} else if (nrow(OsC@meta.data) > 10000){
+  dotsize = 0.5
+} else if (nrow(OsC@meta.data) > 20000){
+  dotsize = 0.1
+} else if (nrow(OsC@meta.data) > 50000){
+  dotsize = 0.05
+}
+
+legendDotSize <- 5
+dendrofactor <- 5
+
+## Setting plotting parameters                                               ##
+###############################################################################
+
+
+###############################################################################
+## Add meta data                                                             ##
+
+FN <- "design/sc.design.file.csv"
+
+if (file.exists(FN)){
+    if (file.exists(FN)){
+        dfObio <- read.csv(FN, header = F, stringsAsFactors = F)
+    }
+
+    dfObio[is.na(dfObio)] <- ""
+    
+    dfObio <- dfObio[dfObio[,1] != "", ]
+    
+    dfObio <- data.frame(t(dfObio), stringsAsFactors = F)
+    
+    names(dfObio) <- as.vector(t(dfObio[1,]))
+    dfObio <- dfObio[-1,]
+    pos <- unique(
+        c(
+            grep("meta_", names(dfObio)),
+            grep("META_", toupper(names(dfObio)))
+        )
+    )
+    
+    if (length(pos) > 0){
+        selVec <- c(
+            "sampleName",
+            names(dfObio)[pos]
+        )
+      
+        dfTemp <- dfObio[,selVec]
+        
+        dfMeta <- OsC@meta.data
+        dfMeta[["cellID"]] <- row.names(dfMeta)
+        dfMeta <- dfMeta[,c("cellID", "sampleID")]
+        
+        dfTemp <- merge(
+            dfTemp, 
+            dfMeta, 
+            by.x = "sampleName",
+            by.y = "sampleID"
+        )
+        
+        row.names(dfTemp) <- dfTemp$cellID
+        dfTemp$cellID <- NULL
+        
+        OsC <- addDf2seuratMetaData(
+            obj = OsC, 
+            dfAdd = dfTemp
+        )
+    }
+}
+
+
+## Done create cellRanger QC plots                                           ##
+###############################################################################
+
+###############################################################################
+## Add meta data                                                             ##
+
+FN <- "design/sc.design.file.csv"
+
+if (file.exists(FN)){
+    if (file.exists(FN)){
+        dfObio <- read.csv(FN, header = F, stringsAsFactors = F)
+    }
+
+    dfObio[is.na(dfObio)] <- ""
+    
+    dfObio <- dfObio[dfObio[,1] != "", ]
+    
+    dfObio <- data.frame(t(dfObio), stringsAsFactors = F)
+    
+    names(dfObio) <- as.vector(t(dfObio[1,]))
+    dfObio <- dfObio[-1,]
+    pos <- unique(
+        c(
+            grep("meta_", names(dfObio)),
+            grep("META_", toupper(names(dfObio)))
+        )
+    )
+    
+    if (length(pos) > 0){
+        selVec <- c(
+            "sampleName",
+            names(dfObio)[pos]
+        )
+      
+        dfTemp <- dfObio[,selVec]
+        
+        dfMeta <- OsC@meta.data
+        dfMeta[["cellID"]] <- row.names(dfMeta)
+        dfMeta <- dfMeta[,c("cellID", "sampleID")]
+        
+        dfTemp <- merge(
+            dfTemp, 
+            dfMeta, 
+            by.x = "sampleName",
+            by.y = "sampleID"
+        )
+        
+        row.names(dfTemp) <- dfTemp$cellID
+        dfTemp$cellID <- NULL
+        dfTemp$sampleName <- NULL
+        
+        OsC <- addDf2seuratMetaData(
+            obj = OsC, 
+            dfAdd = dfTemp
+        )
+    }
+}
+
+
+```
+
+

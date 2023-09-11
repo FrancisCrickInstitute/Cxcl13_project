@@ -1,0 +1,153 @@
+```{r populate_and_upload_meta_data_database, eval=TRUE, echo=F, results=F}
+## libraries ##
+library(tidyverse)
+library(Seurat)
+library(scales)
+
+VersionPdfExt <- paste0(".V", gsub("-", "", Sys.Date()), ".pdf")
+
+if (dir.exists("/Volumes/babs/working/boeings/")){
+    hpc.mount <- "/Volumes/babs/working/boeings/"
+} else if (dir.exists("Y:/working/boeings/")){
+    hpc.mount <- "Y:/working/boeings/"
+} else if (dir.exists("/camp/stp/babs/working/boeings/")){
+    hpc.mount <- "/camp/stp/babs/working/boeings/"
+} else {
+    hpc.mount <- ""
+}
+
+#Create the environment and load a suitable version of R, e.g. so:
+FN <- paste0(hpc.mount, "Projects/reference_data/documentation/BC.parameters.txt")
+dbTable <- read.delim(
+    FN, 
+    sep = "\t",
+    stringsAsFactors = F
+)
+
+db.pwd <- as.vector(dbTable[1,1])
+
+
+
+
+
+
+
+###############################################################################
+## Add additional UMAP annotations
+addFNvec <- c(
+  "../temp/UMAP.regression.coordinates.txt",
+  "../temp/ClusterFinder.output.txt" 
+)
+
+#row.names(OsC@meta.data) <- OsC@meta.data$cellID
+
+for (i in 1:length(addFNvec)){
+    if (file.exists(addFNvec[i])){
+        dfAdd <- read.delim(
+            addFNvec[i],
+            header = T, 
+            sep = "\t",
+            stringsAsFactors = F
+        )
+        
+        row.names(dfAdd) <- dfAdd$cellID
+        dfAdd$cellID <- NULL
+        dfAdd <- dfAdd[row.names(dfAdd) %in% OsC@meta.data$cellID,]
+        
+        OsC <- biologicToolsSC::addDf2seuratMetaData(
+            obj = OsC,
+            dfAdd = dfAdd
+        )
+    }
+}
+
+dfdbTable <- OsC@meta.data  
+
+dfdbTable[["sample_group"]] <- dfdbTable$clusterName
+dfdbTable[["sample_group"]] <- dfdbTable$clusterName
+dfdbTable[["sample_group_colors"]] <- dfdbTable$clusterColor
+
+
+###############################################################################
+## Add Sample and G2M colors if available                                    ##
+if (length(grep("sampleID", names(dfdbTable))) > 0){
+    identities <- levels(factor(OsC@meta.data[,"sampleID"]))
+    sample_group_colors <- hue_pal()(length(identities))
+    
+    dfdbTable[["sampleID_colors"]] <- dfdbTable[["sampleID"]]
+    
+    for (i in 1:length(identities)){
+        dfdbTable$sampleID_colors <- gsub(identities[i], sample_group_colors[i], dfdbTable$sampleID_colors)
+    }
+}
+
+## G2M colors ##
+if (length(grep("Phase", names(dfdbTable))) > 0){
+    identities <- levels(factor(OsC@meta.data[,"Phase"]))
+    sample_group_colors <- hue_pal()(length(identities))
+    
+    dfdbTable[["Phase_colors"]] <- dfdbTable[["Phase"]]
+    
+     for (i in 1:length(identities)){
+        dfdbTable$Phase_colors <- gsub(identities[i], sample_group_colors[i], dfdbTable$Phase_colors)
+    }
+}
+
+if (length(grep("DF_Classification", names(dfdbTable)) > 0)){
+    #######################
+    ## Edit singlet and doublet
+    dfdbTable$DF_Classification <- gsub(
+        "Singlet", 1, dfdbTable$DF_Classification)
+    
+    dfdbTable$DF_Classification <- gsub(
+        "Doublet", 2, dfdbTable$DF_Classification)
+    
+    dfdbTable$DF_Classification <- as.numeric(dfdbTable$DF_Classification)
+    ## done
+    ########################
+}
+
+##
+###############################################################################  
+  
+###############################################################################
+## Add additonal classifications                                             ##
+
+# dfdbTable[["Sample_Group"]] <- ""
+# groupLength <- nchar(dfdbTable$Sample_Group)
+# groupLength <- groupLength -1
+# dfdbTable[["Sample_Group"]] <- substr(dfdbTable$sampleID, 1, groupLength)
+
+##
+###############################################################################
+
+names(dfdbTable) <- gsub("\\.", "_", names(dfdbTable))
+
+selVec <- names(dfdbTable)[!duplicated(names(dfdbTable))]
+
+dfdbTable <- dfdbTable[,selVec]
+dfdbTable$G2M_Score_1 <- NULL
+dfdbTable$S_Score_1 <- NULL
+dfdbTable$old_ident_1 <- NULL
+
+
+pos <- grep("integrated_", names(dfdbTable))
+if (length(pos) > 0){
+    dfdbTable <- dfdbTable[,-pos]
+}
+
+
+biologicSeqTools::upload.datatable.to.database(
+    host = Obio@dbDetailList$host,
+    user = Obio@dbDetailList$db.user,
+    password = db.pwd,
+    prim.data.db = Obio@dbDetailList$primDataDB,
+    dbTableName = Obio@parameterList$PCAdbTableName,
+    df.data = dfdbTable,
+    db.col.parameter.list = biologicSeqTools::inferDBcategories(dfData = dfdbTable),
+    new.table = TRUE
+)
+
+killDbConnections()
+
+```

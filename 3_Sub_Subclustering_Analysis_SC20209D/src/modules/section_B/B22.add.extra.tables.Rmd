@@ -1,0 +1,34 @@
+<!-- Set PArameters Module -->
+<!-- Set the chnkPrefix to make all chunks unique in the overall folder -->
+```{r partB_add_extra_tables, echo=TRUE, eval=TRUE, warning=FALSE}
+chnkPrefix <- "partB.add.extra.tables."
+VersionPdfExt <- VersionPdfExt <- paste0(".",chnkPrefix,"V", gsub("-", "", Sys.Date()), ".pdf")
+
+```
+
+
+
+```{r Additional tables, echo=F, eval=TRUE, warning=FALSE, results=F} 
+dfCounts <- data.frame(OsC[["RNA"]]@counts)
+dfCounts[["gene"]] <- row.names(dfCounts)
+dfCounts <- gather(
+    dfCounts, 
+    condition, 
+    counts, 1:(ncol(dfCounts)-1), 
+    factor_key=TRUE
+)
+dfCounts <- dfCounts[dfCounts$counts != 0,]
+Obio@dataTableList[["dfCounts"]] <- dfCounts
+
+# slotNames(OsC[["RNA"]])
+dfExpr <- data.frame(OsC[["RNA"]]@data)
+dfExpr[["gene"]] <- row.names(dfExpr)
+dfExpr <- gather(
+    dfExpr, 
+    condition, 
+    expr, 1:(ncol(dfExpr)-1), 
+    factor_key=TRUE
+)
+dfExpr <- dfExpr[dfExpr$expr != 0,]
+Obio@dataTableList[["dfExpr"]] <- dfExpr
+```

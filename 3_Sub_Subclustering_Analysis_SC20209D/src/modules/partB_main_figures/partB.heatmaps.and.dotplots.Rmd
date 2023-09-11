@@ -1,0 +1,466 @@
+<!-- Set PArameters Module -->
+<!-- Set the chnkPrefix to make all chunks unique in the overall folder -->
+```{r partB_heatmaps_and_dotplots, echo=TRUE, eval=TRUE, warning=FALSE}
+chnkPrefix <- "partB.heatmaps.dotplots."
+VersionPdfExt <- VersionPdfExt <- paste0(".",chnkPrefix,"V", gsub("-", "", Sys.Date()), ".pdf")
+
+```
+
+
+
+```{r Cluster_overview_data_prep, echo=TRUE, eval=TRUE, warning=FALSE, results=F}
+
+plotList <- list()
+chnkVec <- as.vector(NULL, mode = "character")
+
+###############################################################################
+## Make Heatmap                                                              ##
+
+#OsC@meta.data[["hmIdent2"]] <- paste0("C", OsC@meta.data[,"seurat_clusters"])
+
+Idents(OsC) <- "clusterName"
+
+# levels <- Obio@parameterList$clusterNameOrder
+# 
+# levels(OsC) <- levels
+
+## Deal with more than 5000 cells ##
+if (nrow(OsC@meta.data) > 5000){
+    set.seed(127)
+    n.cells <- 5000
+    OsC_HM <- OsC
+    OsC_HM@meta.data[["HM_sel"]] <- 0
+    selPos <- sample(x = nrow(OsC_HM@meta.data), size = n.cells, replace = FALSE, prob = NULL)
+    OsC_HM@meta.data[selPos, "HM_sel"] <- 1
+    
+    OsC_HM <- subset(x = OsC_HM, subset = HM_sel == 1)
+    
+    subsetString <- paste0("For this heatmap 5000 cells were randomly selected from ", nrow(OsC@meta.data)," cells in the experiment. ")
+} else {
+    OsC_HM <- OsC
+    subsetString <- ""
+}
+
+## Scale Data ##
+allGenes <- rownames(x = OsC_HM@assays$RNA)
+OsC_HM <- ScaleData(OsC_HM, verbose = FALSE, features=allGenes)
+
+
+Idents(OsC_HM) <- "clusterName"
+Idents(OsC_HM) <- factor(Idents(OsC_HM), levels = Obio@parameterList[["clusterNameOrder"]])
+## Order Heatmap Genes by cluster similarity
+
+## For the moment: resetting heatmap list to keep it short ##
+
+## Select heatmap genes ##
+ 
+
+## Make general markers heatmpa ##
+dfGeneralMarkers <- Obio@dataTableList$dfGeneralMarkers 
+dfGeneralMarkersPos <- dfGeneralMarkers[dfGeneralMarkers$avg_diff > 0,]
+
+Nsel <- 1
+Ncluster <- length(unique(OsC@meta.data$clusterName))
+
+geneVec <- as.vector(NULL, mode="character")
+while(length(geneVec) < 5*Ncluster & Nsel < nrow(dfGeneralMarkersPos)){
+    geneVec <-  as.vector(unique(data.frame(dfGeneralMarkersPos %>% group_by(cluster) %>% top_n(Nsel, avg_diff))[,"gene"]))
+    Nsel <- Nsel + 1
+}
+
+
+
+if (length(geneVec) > 2){
+    Obio@parameterList[["cat2HMplotList"]][["Top_Cluster_Markers"]] <- geneVec 
+}
+
+## Add top transcription factors for each cluster ##
+## Get transcription factor genes ##
+if (Obio@parameterList$geneIDcolumn != "mgi_symbol" & Obio@parameterList$geneIDcolumn != "hgnc_symbol") {
+    queryGS <- "hgnc_symbol" 
+} else {
+    queryGS <- Obio@parameterList$geneIDcolumn
+}
+
+
+tempVec <- retrieve.gene.category.from.db(
+    cat_id = "ag_lab_categories__10",
+    password = db.pwd,
+    gene.symbol = queryGS,
+    user = Obio@parameterList$db.user,
+    host = Obio@parameterList$host
+)
+
+###############################################################################
+## If this is fish, translation is non-human or non-mouse, translation is necessary
+if (queryGS != Obio@parameterList$geneIDcolumn){
+    dfAnno <- Obio@dfGeneAnnotation
+    dfAnno <- unique(dfAnno[,c("hgnc_symbol",Obio@parameterList$geneIDcolumn )])
+    dfAnno <- dfAnno[dfAnno$hgnc_symbol != "", ]
+    dfAnno <- dfAnno[dfAnno$hgnc_symbol %in% tempVec, ]
+    tempVec <- unique(dfAnno[,Obio@parameterList$geneIDcolumn])
+    tempVec <- tempVec[tempVec != ""]
+}
+
+dfHMG <- dfGeneralMarkersPos[dfGeneralMarkersPos$gene %in% tempVec, ]
+dfHMGsel <- data.frame(dfHMG %>% group_by(cluster) %>% top_n(5, avg_diff))
+
+if (length(as.vector(unique(dfHMGsel$gene))) > 2){
+    Obio@parameterList[["cat2HMplotList"]][["Top_TF_Cluster_Markers"]] <- as.vector(unique(dfHMGsel$gene))
+}
+## Done with translation
+  
+
+## Add linear regression heatmap for all genes ##
+
+dfClusterResiduals <- Obio@dataTableList[["dfClusterResiduals"]] 
+
+dfLongResiduals <- data.frame(
+    dfClusterResiduals %>% pivot_longer(!gene, names_to = "cluster", values_to = "residuals")
+)
+
+dfTop5 <- data.frame(dfLongResiduals %>% group_by(cluster) %>%   top_n(5, residuals))
+dfTop5 <- dfTop5[order(dfTop5$cluster),]
+geneVec <- as.vector(unique(dfTop5$gene))
+if (length(geneVec) > 2){
+    Obio@parameterList[["cat2HMplotList"]][["Top_LR_Cluster_Markers"]] <- geneVec
+}
+## Add linear regression heatmap for transcription factors ##
+dfLRsel <- dfLongResiduals[dfLongResiduals$gene %in% tempVec, ]
+dfTop5 <- data.frame(dfLRsel %>% group_by(cluster) %>%   top_n(5, residuals))
+dfTop5 <- dfTop5[order(dfTop5$cluster),]
+
+geneVec <- as.vector(unique(dfTop5$gene))
+if (length(geneVec) > 2){
+    Obio@parameterList[["cat2HMplotList"]][["Top_LR_TF_Cluster_Markers"]] <- geneVec
+}
+
+
+
+## Invert listing order##
+orderVec <- rev(names(Obio@parameterList$cat2HMplotList))
+
+topVec <- c(
+    "Top_Cluster_Markers", 
+    "Top_TF_Cluster_Markers", 
+    "Top_LR_Cluster_Markers",
+    "Top_LR_TF_Cluster_Markers"
+)
+
+topVec <- topVec[topVec %in% orderVec]
+orderVec <- orderVec[!(orderVec %in% topVec)]
+
+orderVec <- c(
+  topVec, 
+  orderVec
+)
+
+# Obio@parameterList$cat2HMplotList <- Obio@parameterList$cat2HMplotList[orderVec]
+# 
+# lapply(Obio@parameterList[["cat2HMplotList"]], function(x) x[length(x) > 2])
+
+
+l <- unlist(lapply(Obio@parameterList[["cat2HMplotList"]], function(x) length(as.vector(x)) > 2))
+selVec <- names(Obio@parameterList[["cat2HMplotList"]] )[l]
+
+Obio@parameterList[["cat2HMplotList"]] <- Obio@parameterList[["cat2HMplotList"]][selVec]
+
+
+for (i in 1:length(Obio@parameterList[["cat2HMplotList"]])){
+    tag <- paste0("HM_", names(Obio@parameterList$cat2HMplotList)[i])
+    textSize <- 5
+    HMname <- names(Obio@parameterList[["cat2HMplotList"]])[i]
+    
+    colors <- unique(OsC_HM@meta.data$clusterColor)
+    
+    plotList[[tag]] <- DoHeatmap(
+                object = OsC_HM,
+                features = Obio@parameterList[["cat2HMplotList"]][[i]],
+                #group.by = "hmIdent",
+                draw.lines =T,
+                label = T,
+                group.bar = TRUE,
+                slot = "scale.data",
+                lines.width = 2, #With of separation lines in 'cells',
+                size = 2,
+                hjust = 0,
+                angle = 90,
+                group.colors = colors,
+                #slim.col.label = TRUE,
+                #remove.key = removeKey
+            # ) + theme(legend.position = "none"
+            ) + theme(
+                  text = element_text(size=textSize),
+                  legend.position="bottom" #,
+                  #axis.text.x = element_text(angle = 90, hjust=1)
+                
+            ) + scale_fill_gradientn(colors = c("blue", "white", "red")
+            ) 
+    
+    
+    
+    
+    ## Save to file ##
+            FNbase <- paste0(tag, VersionPdfExt)
+            FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+            FNrel <- paste0("report_figures/", FNbase)
+
+            pdf(FN)
+                print(plotList[[tag]])
+            dev.off()
+
+            
+            
+            ###################
+            ## Add link to interactive heatmap for this project
+                    
+            #for (i in 1:length(residualClusterMarkers)){
+            
+            ## Create default ##
+            link <- ""
+            if (Obio@projectDetailList$species %in% c("mus_musculus", "homo_sapiens")){
+                cat.name <- tag
+                cat_type <- paste0("temp_", Obio@parameterList$project_id)
+                        
+                cat.description.text <- tag 
+                        
+                gene.vec <- Obio@parameterList[["cat2HMplotList"]][[i]]
+                        
+                gene.vec <- gene.vec[gene.vec != ""]
+                gene.vec <- sort(na.omit(gene.vec))
+                        
+                ## Determine if cat exists ##
+                        
+                        
+                catID <- add.category.to.lab.reference.table.hs(
+                    host = Obio@dbDetailList$host,
+                    pwd = db.pwd,
+                    user = Obio@dbDetailList$db.user,
+                    cat.ref.db = Obio@dbDetailList$ref.cat.db,
+                    cat.ref.db.table = Obio@parameterList$lab.categories.table,
+                    gene.vector = gene.vec,
+                    gene.id = Obio@parameterList$geneIDcolumn, #options hgnc_symbol, mgi_symbol
+                    mm.hs.conversion.file =  paste0(cwd, "/assets/annotation/homologene.data.txt"),
+                    cat_name = cat.name,
+                    cat_type = cat_type,
+                    data_source = paste0(Obio@parameterList$labname, " Lab"),
+                    comments_1 = "",
+                    comments_2 = "",
+                    new.lab.category.table = FALSE,
+                    cat.description.db  = "internal_categories",
+                    cat.description.db.table = "category_description",
+                    cat.description.text = cat.description.text,
+                    lab.name = Obio@parameterList$labname,
+                    replaceExistingCatName = TRUE
+                ) 
+                    
+            link <- paste0('Link to an interactive version of <a href="https://',urlString,'/',Obio@parameterList$project_id,'/category-view/',catID,'" target="_blank">this heatmap</a>. ')            
+               
+            }    
+            #} ## End dfDat loop
+            
+            
+            ## Done adding link
+            ##############################
+            
+            
+            
+            ## Create R markdown chunk ##
+            figLegend <- paste0(
+                '**Figure ',
+                figureCount,
+                ':** ',HMname ,' Heatmap showing the most distinct marker genes in each cluster. ' , subsetString,
+                'Download a pdf of this figure <a href="',FNrel,'" target="_blank">here</a>. ',
+                link
+            )
+
+
+            
+
+
+
+            figureCount <- figureCount + 1
+
+            NewChnk <- paste0(
+                "#### Heatmap ", HMname,
+                "\n```{r Heatmap_", tag,
+                ", results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",
+                figLegend,"'}\n",
+                "\n",
+                "\n print(plotList[['",tag,"']])",
+                "\n cat(  '\n')",
+                "\n\n\n```\n"
+            )
+
+        
+    
+    chnkVec <- c(
+        chnkVec,
+        NewChnk
+)
+    
+}
+
+
+
+rm(OsC_HM)
+
+
+## Done making Heatmap                                                       ##
+###############################################################################
+
+###############################################################################
+## Make dotplot 
+
+Idents(OsC) <- "clusterName"
+
+# levels <- paste0(
+#     "C",
+#     sort(unique(OsC@meta.data[,"seurat_clusters"]))
+#  )
+# 
+# levels(OsC) <- levels
+
+
+dpGenes <- as.vector(unique(dfTop5$gene))
+
+if (length(dpGenes) >= 50){
+  dpGenes <- as.vector(unique(dfTop1$gene))  
+}
+
+
+#dpGenes <- rev(dpGenes[!(duplicated(dpGenes))])
+
+tag <- paste0("Dotplot_", "Var_Genes")
+textSize <- 5
+
+dfCol <- unique(OsC@meta.data[,c("clusterName", "clusterColor")])
+if(!is.null(Obio@parameterList$clusterNameOrder)){
+    row.names(dfCol) <- dfCol$clusterName
+    dfCol <- dfCol[Obio@parameterList$clusterNameOrder,]
+}
+
+colVec <- as.vector(dfCol$clusterColor)
+names(colVec) <- dfCol$clusterName
+textSize <- 2
+if (length(colVec) > 5){
+    textSize <-1
+} else if (length(colVec) > 20){
+    textSize <- 0.75
+} else if (length(colVec) > 40){
+    textSize <- 0.5
+}
+
+
+Idents(OsC) <- "clusterName"
+Idents(OsC) <- factor(Idents(OsC), levels = Obio@parameterList[["clusterNameOrder"]])
+
+#OsC@meta.data$clusterName <- factor(OsC@meta.data$clusterName, levels = #Obio@parameterList[["clusterNameOrder"]])
+
+
+plotList[[tag]] <- DotPlotSB(
+        object = OsC,
+        features = dpGenes,
+        assay = "RNA",
+        #cols = cols,
+        group.by = NULL,
+        split.by = NULL,
+        dot.scale = 4,
+        col.min = 0,
+        col.max = 5
+    ) + ggtitle(gsub("_", "", tag)
+    ) + xlab(""
+    ) + coord_fixed(
+    # ) + coord_flip(
+    ) + theme_bw() +
+  theme(axis.text.x = element_text(size=rel(textSize), angle = 45, hjust=1, color = colVec))
+
+# plotList[[tag]] <- DotPlot(
+#         object = OsC,
+#         features = dpGenes,
+#         assay = "RNA",
+#         #cols = cols,
+#         group.by = NULL,
+#         split.by = NULL,
+#         dot.scale = 4,
+#         col.min = 0,
+#         col.max = 5
+#     ) + ggtitle(gsub("_", "", tag)
+#     ) + xlab(""
+#     ) + coord_fixed(
+#     #) + coord_flip(
+#     ) + theme_bw() +
+#   theme(axis.text.x = element_text(size=rel(0.5), angle = 45, hjust=1, color = colVec))
+#     
+    
+
+## Save to file ##
+            FNbase <- paste0(tag, VersionPdfExt)
+            FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+            FNrel <- paste0("report_figures/", FNbase)
+
+            pdf(FN)
+                print(plotList[[tag]])
+            dev.off()
+
+
+            ## Create R markdown chunk ##
+            figLegend <- paste0(
+                '**Figure ',
+                figureCount,
+                ':** Dotplot showing showing selected marker genes. ',
+                'Download a pdf of this figure <a href="',FNrel,'" target="_blank">here</a>. '
+            )
+
+
+
+
+
+
+            figureCount <- figureCount + 1
+
+            NewChnk <- paste0(
+                "#### Dotplot Markers",
+                "\n```{r Dotplot_var_",
+                ", results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",
+                figLegend,"'}\n",
+                "\n",
+                "\n print(plotList[['",tag,"']])",
+                "\n cat(  '\n')",
+                "\n\n\n```\n"
+            )
+
+        
+    
+    chnkVec <- c(
+        chnkVec,
+        NewChnk
+)    
+    
+## Done making dotplot                                                       ##
+###############################################################################
+
+############################
+## Make cat feature plot
+
+## done making cat feature plot
+################################
+
+if (length(plotList) > 3){
+    tabVar <- ".tabset .tabset-fade .tabset-dropdown"
+} else {
+    tabVar <- ".tabset .tabset-fade .tabset-pills"
+}    
+    
+```
+
+
+### Heatmaps and Dotplots {`r tabVar`}
+
+In this section heatmaps and dotplots for various gene categories are provided. 
+
+```{r Cluster_overview, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"}
+
+cat(paste(knit(text = chnkVec, quiet = T), collapse = '\n'))
+
+```

@@ -1,0 +1,188 @@
+---
+output: 
+    html_document:
+        code_folding: hide
+        df_print: tibble
+        highlight: default
+        theme: paper
+        toc: true
+        toc_depth: 5
+        toc_float: true
+        css: src/assets/style/style.css
+
+always_allow_html: yes
+
+
+---
+    
+    
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+    tidy = F,
+    tidy.opts = list(width.cutoff = 120),
+    message = FALSE,
+    warning = FALSE
+)
+
+workdir <- getwd()
+figureCount <- 1
+tableCount <- 1
+
+if (dir.exists("/Volumes/babs/working/boeings/")){
+    hpc.mount <- "/Volumes/babs/working/boeings/"
+} else if (dir.exists("Y:/working/boeings/")){
+    hpc.mount <- "Y:/working/boeings/"
+} else if (dir.exists("/camp/stp/babs/working/boeings/")){
+    hpc.mount <- "/camp/stp/babs/working/boeings/"
+} else {
+    hpc.mount <- ""
+}
+
+
+
+source("assets/R/scTools.r")
+source("assets/R/SBwebtools.pckg.r")
+
+## Set correct paths ##
+if (length(.libPaths()) > 2){
+    .libPaths(.libPaths()[2:3])
+}
+
+###############################################################################
+## Set db access credentials                                                 ##
+FN <- paste0(hpc.mount, "Projects/reference_data/documentation/BC.parameters.txt")
+dbTable <- read.delim(
+    FN, 
+    sep = "\t",
+    stringsAsFactors = F
+)
+
+db.pwd <- as.vector(dbTable[1,1])
+
+## Done                                                                      ##
+###############################################################################
+
+
+
+runDoubletFinder <- FALSE
+
+```
+
+<!-- Outputs/results from essential blocks will be required for subsequent modules. -->
+<!-- Essential modules should be run in order. -->
+<!-- Optional modules create output only. -->
+
+<!-- Essential 1: (output required later): Set Parameters and directories and create Obio object Chapter/Module -->
+```{r child = 'src/modules/settings/set.parameters.Rmd', eval=TRUE}
+```
+
+<!-- Optional 2: Create 10X QC Table Chapter/Module -->
+```{r child = 'src/modules/qc/create.10X.QC.table.Rmd', eval=FALSE}
+```
+
+<!-- Essential 2: (output required later): Create Seurat Sample List Chapter/Module -->
+```{r child = 'src/modules/qc/A.create.sample.list.Rmd', eval=FALSE}
+```
+
+<!-- Optional 3: Create QC Plots Chapter/Module -->
+```{r child = 'src/modules/qc/A.create.sample.level.QC.plots.Rmd', eval=FALSE}
+```
+
+<!-- Optional 4: Perform three cell cycle regressions: none, G2M/S and full Chapter/Module -->
+```{r child = 'src/modules/qc/A.perform.cell.cycle.regression.Rmd', eval=FALSE}
+```
+
+<!-- Optional 5: Create category feature plots -->
+```{r child = 'src/modules/qc/A.create.integrated.cat.feature.plots.Rmd', eval=FALSE}
+```
+
+
+
+
+
+```{r saveobject, eval=TRUE, echo=T, results=F}
+### Will save Obio object here, so it can be re-used with different parameters
+save(Obio, 
+     file = paste0(
+         Obio@parameterList$localWorkDir,
+         Obio@parameterList$project_id,
+         ".bioLOGIC.Robj"
+     )
+)
+
+print("R bioLOGIC single cell object initialized.")
+
+```
+
+## Documentation
+```{r documentation, eval=TRUE, echo=T, results=T}
+sessionInfo()
+```
+
+```{r create_report_params, eval=T, results="asis"}
+
+## Try to retrieve project data from db ##
+library(RMySQL)
+db.pwd2 <- "_asf_"
+db.user2 <- "asf"
+host2 <- "ms1.thecrick.org"
+projectParams <- Obio@documentationParams
+
+tryCatch({
+    dbDB = dbConnect(drv = RMySQL::MySQL(), user = db.user2, password = db.pwd2, host = host2, dbname = "asf");
+dfProposal =  dbGetQuery(dbDB, paste0("SELECT * FROM asf_proposals WHERE project_name ='",Obio@parameterList$lims.id,"'"));
+dbDisconnect(dbDB)
+  }, error = function(x) {
+    message("Project Database could not be reached or has no entry in Obio@parameterList$lims.id for this analysis.")
+   
+})
+
+if (exists("dfProposal")){
+    if (!is.na(dfProposal[1,"ProjectAlias"]) & dfProposal[1,"ProjectAlias"] != ""){
+        projectParams[["title"]] = paste0(dfProposal[1,"ProjectAlias"], " - ", dfProposal[1,"project_name"])
+    }
+    
+    if (!is.na(dfProposal[1,"project_user"]) & dfProposal[1,"project_user"] != ""){
+        projectParams[["subtitle"]] = paste0(dfProposal[1,"user_lab"], " Lab - ", dfProposal[1,"project_user"])
+        projectParams[["subtitle"]] <- gsub("^ Lab - ", "", projectParams[["subtitle"]])
+        
+    }
+    
+    if (!is.na(dfProposal[1,"proposal_text"]) & dfProposal[1,"proposal_text"] != ""){
+        projectParams[["abstract"]] = dfProposal[1,"proposal_text"]
+       
+        
+    }
+}
+   
+## Escape all special characters
+projectParams <- lapply(
+  projectParams, function(x) 
+  #gsub("([.|()\\^{}+$*?]|\\[|\\])", "\\\\\1", x)
+  gsub("([.|()/\\^{}+$*?]|\\[|\\])", " ", x)
+) 
+
+projectParams <- lapply(
+  projectParams, function(x) 
+  #gsub("([.|()\\^{}+$*?]|\\[|\\])", "\\\\\1", x)
+  gsub("\\\n", " ", x)
+) 
+
+
+#projectParams$title <- "Title"
+projectParams$abstract <- "This is the QC section. In this section basic sequencing parameters are documented. Then particles that contain only ambient RNA or dead/dying cells are identified to be removed. An estimate on doubets (GEMS containing more than one cell) is made. Finally biological biases by cell cycle or gender are evaluated and regressed out as required."
+#projectParams$subtitle <- "Abstract"
+
+```
+
+---
+title: "`r projectParams$title`"
+subtitle:  "`r projectParams$subtitle`"
+author:
+    - Stefan Boeing^[The Francis Crick Institute, stefan.boeing@crick.ac.uk]
+date: 'Compiled: `r format(Sys.Date(), "%B %d, %Y")`'
+
+abstract: |
+    "`r projectParams$abstract`"
+
+---

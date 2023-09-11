@@ -1,0 +1,114 @@
+<!-- Set PArameters Module -->
+<!-- Set the chnkPrefix to make all chunks unique in the overall folder -->
+```{r sample_level_QC_init, echo=TRUE, eval=TRUE, warning=FALSE}
+chnkPrefix <- "QC.A.create.sample.level.QC.plots."
+VersionPdfExt <- VersionPdfExt <- paste0(".",chnkPrefix,"V", gsub("-", "", Sys.Date()), ".pdf")
+
+```
+
+```{r percent_mt, echo=TRUE, eval=TRUE, warning=FALSE, results=F}
+###############################################################################
+## Do percent mt plots                                                       ##
+resList <- doPercMT_plotSL(
+        SampleList = SampleList,
+        obj = Obio,
+        figureCount = figureCount,
+        VersionPdfExt = ".pdf",
+        tocSubLevel = 4
+)
+
+
+plotListRF <- resList$plotListRF
+chnkVec <- resList$chnkVec
+figureCount <- resList$figureCount
+
+## Done create cellRanger QC plots                                           ##
+###############################################################################
+
+if (length(plotListRF) > 3){
+    tabVar <- ".tabset .tabset-fade .tabset-dropdown"
+} else {
+    tabVar <- ".tabset .tabset-fade .tabset-pills"
+}
+
+```
+
+### Create PercentMT Historgrams Plots {`r tabVar`}
+```{r Plot_percentMT_hist, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"} 
+
+cat(paste(knitr::knit(text = chnkVec, quiet = T), collapse = '\n'))
+
+```
+
+```{r nFeature_data, echo=TRUE, eval=TRUE, warning=FALSE, results=F}
+###############################################################################
+## Do percent mt plots                                                       ##
+resList <- doRNAfeat_plotSL(
+        SampleList,
+        obj = Obio,
+        figureCount = figureCount,
+        VersionPdfExt = ".pdf",
+        tocSubLevel = 4
+)
+
+plotListRF <- resList$plotListRF
+chnkVec <- resList$chnkVec
+figureCount <- resList$figureCount
+
+## Done create cellRanger QC plots                                           ##
+###############################################################################
+
+if (length(plotListRF) > 3){
+    tabVar <- ".tabset .tabset-fade .tabset-dropdown"
+} else {
+    tabVar <- ".tabset .tabset-fade .tabset-pills"
+}
+
+```
+
+### Create RNA Feature Historgrams Plots {`r tabVar`}
+
+```{r Plot_nFeatureRNA_hist, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"} 
+
+cat(paste(knitr::knit(text = chnkVec, quiet = T), collapse = '\n'))
+
+```
+
+
+```{r UMAP_data, echo=TRUE, eval=TRUE, warning=FALSE, results=F}
+###############################################################################
+## Do percent mt plots                                                       ##
+resList <- doUMAP_plotSL(
+        SampleList,
+        obj = Obio,
+        figureCount = figureCount,
+        VersionPdfExt = ".pdf",
+        tocSubLevel = 4,
+        dotsize = 0.5
+)
+
+plotListSQCUMAP <- resList$plotListSQCUMAP
+chnkVec <- resList$chnkVec
+figureCount <- resList$figureCount
+
+## Done create cellRanger QC plots                                           ##
+###############################################################################
+
+if (length(plotListSQCUMAP) > 3){
+    tabVar <- ".tabset .tabset-fade .tabset-dropdown"
+} else {
+    tabVar <- ".tabset .tabset-fade .tabset-pills"
+}
+
+```
+
+### Plot UMAP Per Sample {`r tabVar`}
+```{r Plot_UMAP_SL, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"} 
+
+cat(paste(knitr::knit(text = chnkVec, quiet = T), collapse = '\n'))
+
+
+tabVar <- ""
+```
+
+

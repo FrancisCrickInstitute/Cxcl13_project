@@ -1,0 +1,444 @@
+<!-- Set PArameters Module -->
+<!-- Set the chnkPrefix to make all chunks unique in the overall folder -->
+```{r partB_AUC_cat_enrichment, echo=TRUE, eval=TRUE, warning=FALSE}
+chnkPrefix <- "partB.AUC.cat.enrichment."
+VersionPdfExt <- VersionPdfExt <- paste0(".",chnkPrefix,"V", gsub("-", "", Sys.Date()), ".pdf")
+
+```
+
+
+
+```{r AUC_prep_from_file, echo=TRUE, eval=TRUE, warning=FALSE, results=F}
+
+# save(Obio, 
+#      file = paste0(
+#          Obio@parameterList$localWorkDir,
+#          Obio@parameterList$project_id,
+#          ".temp.bioLOGIC.Robj"
+#      )
+# )
+
+#print("Obio Object saved.")
+
+# save(OsC,
+#     file = paste0(
+#          Obio@parameterList$localWorkDir,
+#          Obio@parameterList$project_id,
+#         ".Seurat.Robj"
+#      )
+# )
+
+library(AUCell)
+plotList <- list()
+chnkVec <- as.vector(NULL, mode = "character")
+
+# Defined in the section above #
+
+## This needs to become a gmt file ##
+if (is.null(Obio@parameterList$catRefFile)){
+    FNcat <- paste0(hpc.mount, "Projects/schaefera/tobias.ackels/360_scRNAseq_mm_10X_1M_neurons_20k/basedata/asl320.referenceCats.txt")
+} else {
+    FNcat <- Obio@parameterList$catRefFile
+}
+
+if (length(grep(".gmt$", FNcat)) > 0){
+    print("Load gmt file. To be implemented.")
+    stop()
+} else {
+    dfHeatmapGenes <- read.delim(
+      FNcat,
+      header = T,
+      sep = "\t",
+      stringsAsFactors = F
+      
+    )
+    
+    if (is.null(Obio@parameterList[["cat2DotplotList"]])){
+        Obio@parameterList[["cat2DotplotList"]] <- list()
+    }
+    
+    
+    
+
+for (i in 1:ncol(dfHeatmapGenes)){
+    genes <- unique(as.vector(dfHeatmapGenes[2:nrow(dfHeatmapGenes),i]))
+    genes <- genes[genes %in% rownames(x = OsC@assays$RNA)]
+    if (length(unique(genes)) < 61 |  (length(unique(genes)) > 0)){
+        Obio@parameterList[["cat2DotplotList"]][[names(dfHeatmapGenes)[i]]] <- genes
+    }
+    
+    if ((length(unique(genes)) < 501) |  (length(unique(genes)) > 2) ){
+        Obio@parameterList[["cat2HMplotList"]] [[names(dfHeatmapGenes)[i]]] <- genes
+    }
+}
+}
+
+
+## Add transcription factors to dotplot ##
+if (Obio@parameterList$geneIDcolumn != "mgi_symbol" & Obio@parameterList$geneIDcolumn != "hgnc_symbol") {
+    queryGS <- "hgnc_symbol" 
+} else {
+    queryGS <- Obio@parameterList$geneIDcolumn
+}
+
+
+tempVec <- retrieve.gene.category.from.db(
+    cat_id = "ag_lab_categories__10",
+    password = db.pwd,
+    gene.symbol = queryGS,
+    user = Obio@parameterList$db.user,
+    host = Obio@parameterList$host
+)
+
+###############################################################################
+## If this is fish, translation is non-human or non-mouse, translation is necessary
+if (queryGS != Obio@parameterList$geneIDcolumn){
+    dfAnno <- Obio@dfGeneAnnotation
+    dfAnno <- unique(dfAnno[,c("hgnc_symbol",Obio@parameterList$geneIDcolumn )])
+    dfAnno <- dfAnno[dfAnno$hgnc_symbol != "", ]
+    dfAnno <- dfAnno[dfAnno$hgnc_symbol %in% tempVec, ]
+    tempVec <- unique(dfAnno[,Obio@parameterList$geneIDcolumn])
+    tempVec <- tempVec[tempVec != ""]
+}
+
+dfHMG <- dfGeneralMarkers[dfGeneralMarkers$gene %in% tempVec, ]
+dfHMGsel <- data.frame(dfHMG %>% group_by(cluster) %>% top_n(5, avg_diff))
+
+geneVec <- as.vector(unique(dfHMGsel$gene))
+
+if (length(geneVec) > 0){
+    Obio@parameterList[["cat2DotplotList"]][["Top5_TF_per_cluster_Markers"]] <- geneVec
+}
+
+## Add cluster defining transcription factors to the collection ##
+## For the dotplot ##
+
+
+###############################################################################
+## Get backdrop
+
+exprMatrix <- as.matrix(OsC@assays$RNA@counts)
+#logMat <- log10(exprMatrix+1)
+
+# When using a Seurat object #
+logMat <- data.frame(OsC[["RNA"]]@data)
+
+## Load tSNE coordinates ##
+cellsTsne <- data.frame(OsC@reductions$umap@cell.embeddings)
+
+## done
+FNbase <- paste0("CatScatter_Rankings", VersionPdfExt)
+FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+FNrel <- paste0("report_figures/", FNbase)
+    
+
+pdf(FN)
+    cells_rankings <- AUCell_buildRankings(exprMatrix)
+dev.off()
+
+geneSets <- Obio@parameterList$cat2DotplotList
+
+## Remove all genes that are not in the data ##
+allGenes <- row.names(OsC)
+geneSets <- lapply(geneSets, function(x) x[x%in%allGenes]) 
+
+cells_AUC <- AUCell_calcAUC(geneSets, cells_rankings, aucMaxRank=nrow(cells_rankings)*0.05)
+
+## Select thresholds ##
+
+
+FNbase <- paste0("CatScatterHist", VersionPdfExt)
+FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+FNrel <- paste0("report_figures/", FNbase)
+            
+pdf(FN)
+    set.seed(123)
+    cells_assignment <- AUCell_exploreThresholds(
+        cells_AUC, 
+        plotHist=TRUE, 
+        nCores=1, 
+        assign=TRUE
+    )
+dev.off()
+
+if (length(geneSets) != length(cells_assignment)){
+    geneSets <- geneSets[names(geneSets) %in% names(cells_assignment)]
+    
+    Obio@parameterList$cat2DplotList <- Obio@parameterList$cat2DplotList[names(Obio@parameterList$cat2DplotList) %in% names(cells_assignment)]
+    
+    cells_AUC <- AUCell_calcAUC(geneSets, cells_rankings, aucMaxRank=nrow(cells_rankings)*0.05)
+    
+}
+
+## Add data to dfExpr ##
+
+## Plot CatScatters ##
+for (i in 1:length(geneSets)){
+    HMname <- names(geneSets)[i]
+    tag <- gsub("[.]", "_", HMname)
+    
+    FNbase <- paste0("CatScatterHist_", HMname, VersionPdfExt)
+    FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+    FNrel <- paste0("report_figures/", FNbase)
+    
+    
+    selectedThresholds <-  cells_assignment[[i]]$aucThr$thresholds 
+    
+    if ("minimumDens" %in% rownames(selectedThresholds)) {
+        pThr <- selectedThresholds["minimumDens", "threshold"]
+    } else if ("Global_k1" %in% rownames(selectedThresholds)){
+        pThr <- selectedThresholds["Global_k1", "threshold"]
+    } else {
+        pThr <- selectedThresholds[1, "threshold"]
+    }
+    
+    if (nrow(cellsTsne) > 15000){
+        cex = 0.25
+    } else if (nrow(cellsTsne) > 1000){
+        cex = 0.5 
+    } else {
+        cex = 1
+    }
+    
+    
+    ## Get AUC matrix ##
+    tSNE.df <- data.frame(cellsTsne, cell=rownames(cellsTsne))
+    mAUC <- getAUC(cells_AUC)[HMname,rownames(tSNE.df)]
+    dfAUC <- data.frame(mAUC)
+    dfAUC[["cellID"]] <- row.names(dfAUC)
+    dfAUC <- merge(dfAUC, tSNE.df, by.x = "cellID", by.y = "cell")
+    
+    dfDocAUC <- unique(dfAUC[,c("cellID", "mAUC")])
+    dfDocAUC[["cat"]] <- paste0("Cat_",tag) 
+    if (i == 1){
+      dfResAUC <- dfDocAUC
+    } else {
+      dfResAUC <- rbind(
+        dfResAUC, 
+        dfDocAUC
+      )
+    }
+    
+    input <- list(
+        "x_axis" = "UMAP1",
+        "y_axis" = "UMAP2",
+        "gene" = HMname
+    )
+    #dotsize <- cex
+    
+    legendNote <- paste0(
+            " The following genes of this dataset are represented in this figure: ",
+            paste0(sort(Obio@parameterList$cat2DotplotList[[i]]), collapse = ", ")
+        )
+    
+     plotList[[tag]] <- ggplot(data = dfAUC, aes(x=UMAP_1, y=UMAP_2, color = mAUC)
+            )+ geom_point( shape=16, size = dotsize
+            ) + scale_color_gradient("AUC", low="grey", high="darkblue"
+            ) + xlab(input$x_axis) + ylab(input$y_axis
+            ) + theme_bw(
+            )  +  theme(
+                axis.text.y   = element_text(size=8),
+                axis.text.x   = element_text(size=8),
+                axis.title.y  = element_text(size=8),
+                axis.title.x  = element_text(size=8),
+                axis.line = element_line(colour = "black"),
+                panel.border = element_rect(colour = "black", fill=NA, size=1),
+                plot.title = element_text(hjust = 0.5, size = 12)
+            )+ ggtitle(paste0("Category: ", input$gene)
+            ) + coord_fixed(ratio = 1
+            ) 
+     
+     
+     #+ theme(legend.position="none") 
+     
+    FNbase <- paste0("CatScatter", HMname, VersionPdfExt)
+    FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+    FNrel <- paste0("report_figures/", FNbase)
+    
+    pdf(FN)
+        print(plotList[[tag]])
+    dev.off()
+    
+    
+    if (exists("shinyURL") & !is.null(shinyURL)){
+        geneRef <- paste0("Cat_", HMname)
+            link <- paste0(
+              'An interactive version of this figure with additional viewing options can be found <a href="',shinyURL,'?_inputs_&gene=%22',geneRef,'%22" target="_blank">here</a>. '
+            )
+            
+    } else {
+        link <- ""
+    }
+    
+    ## Create R markdown chunk ##
+    figLegend <- paste0(
+        '**Figure ', 
+        figureCount, 
+        'A:** Category Scatter showing gene category ', 
+        HMname, '. ', legendNote, 
+        '. Download a pdf of this figure <a href="',FNrel,'" target="_blank">here</a>. ',
+        link
+    )
+            
+            
+    
+            
+    NewChnk <- paste0(
+        "#### Category Feature Plot ",HMname,
+                "\n```{r CatFeatPlot1_",
+                i,", results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",
+                figLegend,"'}\n",
+                "\n",
+                "\n print(plotList[['",tag,"']])",
+                "\n cat(  '\n')",
+                "\n\n\n```\n"   
+            )
+          
+        
+    
+    chnkVec <- c(
+        chnkVec,
+        NewChnk
+    )
+    
+    ###########################################################################
+    ## Add part B - dotplot                                                  ##
+    DefaultAssay(OsC) <- "RNA"
+
+    # OsC@meta.data[["hmIdent2"]] <- paste0("C", OsC@meta.data[,"seurat_clusters"])
+    # 
+    # levels <- paste0(
+    #   "C",
+    #   sort(unique(OsC@meta.data[,"seurat_clusters"]))
+    #   )
+    # 
+    # OsC@meta.data$hmIdent2 <- factor(OsC@meta.data$hmIdent2, levels=levels)
+    
+    Idents(OsC) <- "clusterName"
+    
+    
+    
+    
+        
+        HMname <- paste0("Dotplot_", names(geneSets)[i])
+        tag <- gsub("[.]", "_", HMname)
+        
+        dpGenes <- unique(geneSets[[i]])
+        legendNote <- paste0("The following genes were found in this category and the single-cell dataset: ", paste0(dpGenes, collapse=", "))
+        
+        OsC_DP <- OsC
+        OsC_DP@meta.data$clusterName <- factor(OsC_DP@meta.data$clusterName, levels = Obio@parameterList[["clusterNameOrder"]])
+        
+        
+        
+        dfCol <- unique(OsC@meta.data[,c("clusterName", "clusterColor")])
+if(!is.null(Obio@parameterList$clusterNameOrder)){
+    row.names(dfCol) <- dfCol$clusterName
+    dfCol <- dfCol[Obio@parameterList$clusterNameOrder,]
+}
+        colVec <- as.vector(dfCol$clusterColor)
+        names(colVec) <- dfCol$clusterName
+      
+        textSize <- 2
+        if (length(colVec) > 5){
+            textSize <-1
+        } else if (length(colVec) > 20){
+            textSize <- 0.75
+        } else if (length(colVec) > 40){
+            textSize <- 0.5
+        }
+
+        
+        plotList[[tag]] <- DotPlotSB(
+            object = OsC_DP,
+            features = dpGenes,
+            #cols = cols,
+            group.by = NULL,
+            split.by = NULL,
+            dot.scale = 4,
+            col.min = 0,
+            col.max = 5,
+            assay = "RNA"
+        ) + ggtitle(gsub("_", " ", tag)
+        ) + coord_fixed(
+        #) + coord_flip(
+        ) + theme_bw() + theme(
+                axis.title.y  = element_blank(),
+                axis.title.x  = element_blank()
+        )  + theme(axis.text.x = element_text(size=rel(textSize), angle = 45, hjust=1, color = colVec))
+        
+        # plotList[[tag]] <- DotPlot(
+        #     object = OsC_DP,
+        #     features = dpGenes,
+        #     #cols = cols,
+        #     group.by = NULL,
+        #     split.by = NULL,
+        #     dot.scale = 4,
+        #     col.min = 0,
+        #     col.max = 5,
+        #     assay = "RNA"
+        # ) + ggtitle(gsub("_", " ", tag)) + coord_fixed() + coord_flip() + theme_bw() + theme(
+        #         axis.title.y  = element_blank(),
+        #         axis.title.x  = element_blank()
+        # )  + theme(axis.text.x = element_text(size=rel(0.5), angle = 45, hjust=1, color = colVec))
+    
+        rm(OsC_DP)
+        
+        FNbase <- paste0(HMname, VersionPdfExt)
+        FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+        FNrel <- paste0("report_figures/", FNbase)
+        
+        pdf(FN)
+            print(plotList[[tag]])
+        dev.off()
+        ## Create R markdown chunk ##
+        figLegend <- paste0(
+            '**Figure ', 
+            figureCount, 
+            'B:** Dotplot showing gene category ', 
+            HMname, '. ', legendNote, 
+            '. Download a pdf of this figure <a href="',FNrel,'" target="_blank">here</a>. '
+        )
+                
+                
+        figureCount <- figureCount + 1 
+                
+        NewChnk <- paste0(
+                    "\n```{r ",tag,
+                    ", results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",
+                    figLegend,"'}\n",
+                    "\n",
+                    "\n print(plotList[['",tag,"']])",
+                    "\n cat(  '\n')",
+                    "\n\n\n```\n"   
+                )
+              
+            
+        
+        chnkVec <- c(
+            chnkVec,
+            NewChnk
+        )
+    
+    
+    ## Done adding dotplot                                                   ##
+    ###########################################################################
+    
+    
+}
+
+Obio@dataTableList[["dfResAUC"]] <- dfResAUC
+
+if (length(plotList) > 3){
+    tabVar <- ".tabset .tabset-fade .tabset-dropdown"
+} else {
+    tabVar <- ".tabset .tabset-fade .tabset-pills"
+}
+
+```
+
+### Category Enrichment Scatterplots {`r tabVar`}
+
+```{r enrichment_plots, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"}
+cat(paste(knit(text = chnkVec, quiet = T), collapse = '\n'))
+```

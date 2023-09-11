@@ -1,0 +1,163 @@
+<!-- Set Parameters Module -->
+<!-- Set the chnkPrefix to make all chunks unique in the overall folder -->
+```{r set_parameters_init, echo=TRUE, eval=TRUE, warning=FALSE}
+chnkPrefix <- "partB.set.parameters."
+VersionPdfExt <- VersionPdfExt <- paste0(".",chnkPrefix,"V", gsub("-", "", Sys.Date()), ".pdf")
+
+```
+
+## Data Preparation
+### Set Parameters
+```{r B_set_directories, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"}
+###############################################################################
+##                                                                           ##
+
+if (dir.exists("/Volumes/babs/working/boeings/")){
+    hpc.mount <- "/Volumes/babs/working/boeings/"
+} else if (dir.exists("Y:/working/boeings/")){
+    hpc.mount <- "Y:/working/boeings/"
+} else if (dir.exists("/camp/stp/babs/working/boeings/")){
+    hpc.mount <- "/camp/stp/babs/working/boeings/"
+} else {
+    hpc.mount <- ""
+}
+
+
+
+## Set database parameters ##
+FN <- paste0(hpc.mount, "Projects/reference_data/documentation/BC.parameters.txt")
+dbTable <- read.delim(
+    FN, 
+    sep = "\t",
+    stringsAsFactors = F
+)
+
+db.pwd <- as.vector(dbTable[1,1])
+
+## Set filename for temp pdf files ##
+
+if (length(.libPaths()) > 2){
+    .libPaths(.libPaths()[2:3])
+}
+
+
+###############################################################################
+## Load Obio object from step A                                              ##
+ObioFN <- paste0(
+    tempWorkDir, "/", 
+    list.files(tempWorkDir)[grep(".bioLOGIC.Robj", list.files(tempWorkDir))]
+)
+
+load(ObioFN)
+
+## Activate debug mode on subset of cells < 1
+Obio@parameterList$debugReduce <- 1
+
+## Set project specific parameters ##
+Obio <- setMountingPoint(Obio)
+Obio <- setAnalysisPaths(Obio)
+Obio <- setCrickGenomeAndGeneNameTable(Obio)
+Obio <- createAnalysisFolders(
+    Obio
+)
+Obio <- setDataBaseParameters(Obio)
+Obio <- addGeneAnnotation(Obio)
+
+## Create Sample List ##
+if (Obio@parameterList$hpcMount != "/camp/stp/babs/working/boeings/"){
+    for (i in 1:length(Obio@sampleDetailList)){
+        Obio@sampleDetailList[[i]]$path <- gsub("/camp/stp/babs/working/boeings/",Obio@parameterList$hpcMount, Obio@sampleDetailList[[i]]$path)
+        
+    }
+}
+        
+            
+            
+        
+    
+
+## Create outputfolders ##
+if (!dir.exists(paste0(Obio@parameterList$localWorkDir,Obio@parameterList$project_id))){
+    dir.create(paste0(Obio@parameterList$localWorkDir,Obio@parameterList$project_id))
+}
+
+
+
+Obio@parameterList[["html_local"]] <- paste0(Obio@parameterList$localWorkDir, "html_local/")
+
+if (!dir.exists(Obio@parameterList[["html_local"]])){
+    dir.create(Obio@parameterList[["html_local"]])
+}
+
+Obio@parameterList[["reportFigDir"]] <- paste0(Obio@parameterList$html_local, "report_figures/")
+pdfTemp <- paste0(Obio@parameterList$reportFigDir, "temp.pdf")
+
+
+if (!dir.exists(Obio@parameterList$reportFigDir)){
+    dir.create(Obio@parameterList$reportFigDir)
+}
+
+figureCount <- 1
+
+## Load R module load R/3.5.1-foss-2018b ##
+#setwd(Obio@parameterList$localWorkDir)
+
+if (Obio@parameterList$host == "10.27.241.234"){
+    urlString <- "biologic.thecrick.org"
+} else {
+    urlString <- "biologic.crick.ac.uk"
+}
+
+
+## Debugging mode on subset of cells ##
+# Obio@parameterList$d
+
+##                                                                           ##
+###############################################################################
+
+```
+
+```{r next_block, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"}
+###############################################################################
+## Create sampleDetail List                                                  ##
+###############################################################################
+## Set gene reference list                                                   ##
+
+
+Obio@dataTableList[["referenceList"]] <- list()
+
+if (is.null(Obio@parameterList$HmDisplayCatsFromDb)){
+    Obio@parameterList$HmDisplayCatsFromDb <- list(
+        "TFs" = "ag_lab_categories__10"
+    )
+}
+
+## Add transcription factors that happen to be cluster markers ##
+catList <- Obio@parameterList$HmDisplayCatsFromDb
+
+
+
+if (Obio@parameterList$geneIDcolumn != "mgi_symbol" 
+    & Obio@parameterList$geneIDcolumn != "hgnc_symbol") {
+    queryGS <- "hgnc_symbol" 
+} else {
+    queryGS <- Obio@parameterList$geneIDcolumn
+}
+
+
+for (i in 1:length(catList)){
+    tempVec <- retrieve.gene.category.from.db(
+        cat_id = catList[[i]],
+        password = db.pwd,
+        gene.symbol = queryGS,
+        user = Obio@parameterList$db.user,
+        host = Obio@parameterList$host
+    )
+    
+    Obio@dataTableList$referenceList[[names(catList)[i]]] <- tempVec
+}
+##                                                                           ##
+###############################################################################
+
+```
+

@@ -1,0 +1,1176 @@
+<!-- Set Parameters Module -->
+<!-- Set the chnkPrefix to make all chunks unique in the overall folder -->
+```{r partT_ouija_init, echo=TRUE, eval=TRUE, warning=FALSE}
+chnkPrefix <- "T3.temp."
+VersionPdfExt <- VersionPdfExt <- paste0(".",chnkPrefix,"V", gsub("-", "", Sys.Date()), ".pdf")
+
+
+#invertOuijaPseudotime <- TRUE
+#useCachedOuijaObject <- TRUE
+source("src/modules/trajectory.analyses/trajectory.helper.functions.R") 
+
+## Avoid downstream renaming
+OsC_store <- OsC
+rm(OsC)
+
+```
+
+
+
+```{r branch_1_plots, eval=TRUE, echo=F, results=F}
+###############################################################################
+## Subset to relevant trajectory                                             ##
+## Export Pseudotime to Seurat object ##
+# Branch 1
+# Clusters Polykeratins (5) > mTecDiff (12) > NEDC_I_NEUROD1 (1) > NEDC_II_NEUROD1 (4) > NEDC_III_SOX2 (2) > NEDC_IV_SOX2 (11)
+branch1 <- c(5, 12, 1, 4, 2, 11)
+
+lineageSelection = branch1
+
+OsC <- subset(x = OsC_store, subset = seurat_clusters %in% lineageSelection )
+
+pseudotimeLineageName <- "Pseudotime_MC_Lineage_1"
+
+
+##                                                                           ##
+###############################################################################
+
+
+
+###############################################################################
+## Init Plot Collection                                                      ##
+
+plotList <- list()
+chnkVec <- as.vector(NULL, mode = "character")
+
+## Done                                                                      ##
+###############################################################################
+
+if (length(plotList) > 3){
+    tabVar <- ".tabset .tabset-fade .tabset-dropdown"
+} else {
+    tabVar <- ".tabset .tabset-fade .tabset-pills"
+}
+
+###############################################################################
+## Find most variable genes in trajectory                                    ##
+
+plotTopNgenes <- 100
+
+Y <- data.matrix( OsC@assays[["RNA"]]@data)
+        
+Y <-  Y[OsC@assays$integrated@var.features,]
+        
+t <- OsC@meta.data[,pseudotimeLineageName]
+        
+# Fit GAM for each gene using pseudotime as independent variable.
+        
+gam.pval <- apply(Y, 1, function(z){
+    d <- data.frame(z=z, t=t)
+    tmp <- gam::gam(z ~ gam::lo(t), data=d)
+    p <- summary(tmp)[4][[1]][1,5]
+    p
+})
+
+
+gam.pval <- sort(gam.pval, decreasing = FALSE)
+gam.pval <- gam.pval[gam.pval < 0.01]
+gam.pval <- sort(gam.pval, decreasing=FALSE)
+
+
+display.gam.pval <- -1*log10(gam.pval)
+maxVal <- max(display.gam.pval[display.gam.pval < Inf])
+display.gam.pval[display.gam.pval == Inf] <- maxVal
+
+topgenes <- names(gam.pval)[1:plotTopNgenes]
+
+heatmapGeneList <- list(
+    "Top_Pseudotime_Variable_Genes" = topgenes
+)
+
+
+###################
+## Make Table
+
+dfOut <- data.frame(gene=names(gam.pval), time_variability_gam_lg10_p_value=display.gam.pval)
+dfOut[["Most_time_variable_genes"]] <- ""
+dfOut[dfOut$gene %in% topgenes, "Most_time_variable_genes"] <- "+"
+
+## Done
+####################
+
+pos <- grep("TFs", names(Obio@dataTableList$referenceList))
+
+if (length(pos > 0)){
+    topgenes.TF <- names(sort(gam.pval, decreasing = FALSE))[names(sort(gam.pval, decreasing = FALSE)) %in% Obio@dataTableList[["referenceList"]]$TFs]
+    topgenes.TF <- topgenes.TF[1:plotTopNgenes]
+    heatmapGeneList[["Top_Pseudotime_Variable_Transcription_Factors"]] <- topgenes.TF
+    dfOut[["Most_time_variable_TFs"]] <- ""
+    dfOut[dfOut$gene %in% topgenes.TF, "Most_time_variable_TFs"] <- "+"
+
+} else {
+    topgenes.TF <- 0
+}
+
+#########################################
+## Add average expression column
+
+###############################################################################
+## Add percentage expressed genes                                            ##
+DefaultAssay(OsC) <- "RNA"
+my_genes <- rownames(x = OsC@assays$RNA)
+
+exp <- FetchData(OsC, my_genes)
+
+ExprMatrix <- round(as.matrix(colMeans(exp  > 0)) *100,1)
+colnames(ExprMatrix)[1] <- "Percent_cells_expressing"
+dfExprMatrix <- data.frame(ExprMatrix)
+dfExprMatrix[["gene"]] <- row.names(dfExprMatrix)
+
+dfExprMatrix <- dfExprMatrix[dfExprMatrix$gene %in% dfOut$gene, ]
+
+dfOut <- dplyr::full_join(
+    dfOut,
+    dfExprMatrix,
+    by="gene"
+)
+
+dfOutDisplay <- dfOut[dfOut$Percent_cells_expressing >= 10, ]
+
+##
+#########################################
+
+#########################################
+## Write to Excel 
+if (!dir.exists(Obio@parameterList[["reportTableDir"]])){
+  dir.create(Obio@parameterList[["reportTableDir"]])
+}
+
+baseFN <- paste0(
+   Obio@parameterList$project_id, 
+   ".Lineage1.variability.table.xlsx"
+)
+
+
+outPutFN <- paste0(
+     Obio@parameterList$reportTableDir,
+     baseFN
+)
+  
+ 
+FNrel <- paste0("report_tables/", baseFN)
+
+wb <- openxlsx::createWorkbook()
+
+hs1 <- openxlsx::createStyle(
+    fontColour = "#ffffff",
+    fgFill = "#000000",
+    halign = "CENTER",
+    textDecoration = "Bold"
+)
+sheetName <- substr("Lineage_1",1,30)
+  
+openxlsx::addWorksheet(
+    wb, 
+    sheetName = sheetName
+)
+  
+openxlsx::freezePane(wb, sheetName ,  firstActiveRow = 2)
+sheetN=1
+openxlsx::writeData(wb, sheetN, dfOut, startRow = 1, startCol = 1, headerStyle = hs1)
+openxlsx::saveWorkbook(
+  wb, 
+  outPutFN , 
+  overwrite = TRUE
+)
+
+## Create table download option ##
+#FNbase <- paste0(Obio@parameterList$project_id, "_Pseudotime_Variable_Genes.xlsx")
+#FN <- paste0(Obio@parameterList$reportTableDir, FNbase)
+#FNrel <- paste0("report_tables/", FNbase)
+tabDownloadLink <- paste0("This table list all potentially time-variable genes in this trajectory [here](",FNrel,")")
+tabLegend = paste0(
+    "**Table: ** Time-variable genes in this trajectory. ",
+    tabDownloadLink
+)
+chnkVec <- paste0(
+        #"#### ", names(dtList),
+        "\n```{r PT_var_datatable, results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",
+        tabLegend,"'}\n",
+        "\n",
+        "\n DT::datatable(dfOutDisplay,rownames = FALSE,  escape = FALSE)",
+        "\n cat(  '\n')",
+        "\n\n\n```\n"   
+    )
+tabVar <- "### Table Time-variable Genes"
+
+
+
+##
+###############################################################################
+
+###############################################################################
+## Gene list to plot                                                         ##
+
+
+heatmapGeneListAdditions <- list(
+    "Custom_GeneSet_Branch_1" = c(
+    "HES1",
+    "CEBPD",
+    "ZFP36L2",
+    "CLU",
+    "KRT15",
+    "KRT19",
+    "FN1",
+    "IFITM3",
+    "CCL19",
+    "PRRX1",
+    "ARID5B",
+    "HEY1",
+    "ASCL1",
+    "CLDN3",
+    "CLDN4",
+    "CLDN9",
+    "CD24",
+    "HES6",
+    "NHLH1",
+    "CFAP298",
+    "GNG8",
+    "STMN1",
+    "KIF19",
+    "METRN",
+    "CIB2",
+    "BEX1",
+    "NEUROD1",
+    "SOX4",
+    "SOX2",
+    "CHRNA1",
+    "LSAMP",
+    "SMIM18",
+    "MYO6",
+    "IRX2",
+    "MYO15A",
+    "ABCA5",
+    "KCNH6",
+    "CCER2",
+    "POU4F3",
+    "PCP4",
+    "PKIB",
+    "ATOH1",
+    "TJAP1",
+    "GRXCR1",
+    "RBM24",
+    "TMPRSS3",
+    "USH2A",
+    "PAX2",
+    "STRC",
+    "OTOF",
+    "GRXCR2",
+    "TRIM36",
+    "RSPH1",
+    "CD164L2",
+    "CRIP3",
+    "FAM183A",
+    "C1orf194",
+    "C1orf232",
+    "MINDY4B",
+    "CCDC81",
+    "C2orf40",
+    "SMPX"
+  )
+)
+
+heatmaGeneList <- do.call(c, list(heatmapGeneList, heatmapGeneListAdditions))
+ 
+```
+
+`r tabVar`
+```{r render_QCTable, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"}
+    cat(paste(knitr::knit(text = chnkVec, quiet = T), collapse = '\n'))
+```
+
+
+```{r mc_heatmaps_part1, eval=TRUE, echo=F, results=F}
+
+
+###############################################################################
+## Init Plot Collection                                                      ##
+
+plotList <- list()
+chnkVec <- as.vector(NULL, mode = "character")
+
+## Done                                                                      ##
+###############################################################################
+
+for (i in 1:length(heatmapGeneList)){
+    ## Relative Heatmap
+    tag <- paste0(names(heatmapGeneList)[i], "_", pseudotimeLineageName, "_relative")
+    plotList[[tag]] <- createLineageHeatmap(
+    OsC,  
+    lineageSelection = NULL,
+    pseudotimeLineageName = pseudotimeLineageName,
+    heatmapGeneVec = heatmapGeneList[[i]],
+    clusterRows = TRUE
+    )
+ 
+    ## Save to file ##
+    FNbase <- paste0(tag, VersionPdfExt)
+    FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+    FNrel <- paste0("report_figures/", FNbase)
+    
+    
+    pdf(FN)
+        print(plotList[[tag]])
+    dev.off()
+    
+    
+    
+    ## Create R markdown chunk ##
+    figLegend <- paste0(
+        '**Figure ', 
+        figureCount, 
+        '**: Heatmap (relative values) ',tag,
+        '. Download a pdf of this figure <a href="',FNrel,'" target="_blank">here</a>. '
+    )
+    figureCount <- figureCount + 1 
+    
+    NewChnk <- paste0(
+        "\n#### ", tag, 
+        "\n```{r ", tag, ", results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",
+        figLegend,"'}\n",
+        "\n",
+        "\n print(plotList[['",tag,"']])",
+        "\n cat(  '\n')",
+        "\n\n\n```\n"   
+    )
+    
+    chnkVec <- c(
+        chnkVec,
+        NewChnk
+    )
+    
+    ## Absolute Heatmap
+    tag <- paste0(names(heatmapGeneList)[i], "_", pseudotimeLineageName, "_absolute")
+    plotList[[tag]] <- createLineageHeatmap(
+        OsC,  
+        lineageSelection = NULL,
+        pseudotimeLineageName = pseudotimeLineageName,
+        heatmapGeneVec = heatmapGeneList[[i]],
+        clusterRows = TRUE,
+        #plotTopNgenes = 100,
+        plotAbsoluteValues = TRUE,  # otherwise: relative
+        highColor = "#00008B",
+        #midColor = "#fffbbc",
+        lowColor = "#d3d3d3"
+    )
+ 
+    ## Save to file ##
+    FNbase <- paste0(tag, VersionPdfExt)
+    FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+    FNrel <- paste0("report_figures/", FNbase)
+    
+    
+    pdf(FN)
+        print(plotList[[tag]])
+    dev.off()
+    
+    
+    
+    ## Create R markdown chunk ##
+    figLegend <- paste0(
+        '**Figure ', 
+        figureCount, 
+        '**: Heatmap ',tag,
+        '. Download a pdf of this figure <a href="',FNrel,'" target="_blank">here</a>. '
+    )
+    figureCount <- figureCount + 1 
+    
+    NewChnk <- paste0(
+        "\n#### ", tag, 
+        "\n```{r ", tag, ", results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",
+        figLegend,"'}\n",
+        "\n",
+        "\n print(plotList[['",tag,"']])",
+        "\n cat(  '\n')",
+        "\n\n\n```\n"   
+    )
+    
+    chnkVec <- c(
+        chnkVec,
+        NewChnk
+    )
+    
+    
+    ## Done                                                                      ##
+    ###############################################################################
+}
+
+if (length(plotList) > 3){
+    tabVar <- ".tabset .tabset-fade .tabset-dropdown"
+} else {
+    tabVar <- ".tabset .tabset-fade .tabset-pills"
+}
+
+```
+
+### Heatmaps Branch 1 {`r tabVar`}
+```{r hm_main_branch1, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"} 
+
+cat(paste(knitr::knit(text = chnkVec, quiet = T), collapse = '\n'))
+
+``` 
+
+
+```{r branch_2_plots, eval=TRUE, echo=F, results=F}
+###############################################################################
+## Subset to relevant trajectory                                             ##
+## Export Pseudotime to Seurat object ##
+# Branch 2
+# Clusters Polykeratins (5) > cTecDiff (9) > cTECI (0) > cTECIII (6) > cTECII (3)
+branch2 <- c(5, 9, 0, 6,3)
+
+lineageSelection = branch2
+
+OsC <- subset(x = OsC_store, subset = seurat_clusters %in% lineageSelection )
+
+pseudotimeLineageName <- "Pseudotime_MC_Lineage_2"
+
+
+##                                                                           ##
+###############################################################################
+
+
+
+###############################################################################
+## Init Plot Collection                                                      ##
+
+plotList <- list()
+chnkVec <- as.vector(NULL, mode = "character")
+
+## Done                                                                      ##
+###############################################################################
+
+if (length(plotList) > 3){
+    tabVar <- ".tabset .tabset-fade .tabset-dropdown"
+} else {
+    tabVar <- ".tabset .tabset-fade .tabset-pills"
+}
+
+###############################################################################
+## Find most variable genes in trajectory                                    ##
+
+plotTopNgenes <- 100
+
+Y <- data.matrix( OsC@assays[["RNA"]]@data)
+        
+Y <-  Y[OsC@assays$integrated@var.features,]
+        
+t <- OsC@meta.data[,pseudotimeLineageName]
+        
+# Fit GAM for each gene using pseudotime as independent variable.
+        
+gam.pval <- apply(Y, 1, function(z){
+    d <- data.frame(z=z, t=t)
+    tmp <- gam::gam(z ~ gam::lo(t), data=d)
+    p <- summary(tmp)[4][[1]][1,5]
+    p
+})
+
+
+gam.pval <- sort(gam.pval, decreasing = FALSE)
+gam.pval <- gam.pval[gam.pval < 0.01]
+gam.pval <- sort(gam.pval, decreasing=FALSE)
+
+
+display.gam.pval <- -1*log10(gam.pval)
+maxVal <- max(display.gam.pval[display.gam.pval < Inf])
+display.gam.pval[display.gam.pval == Inf] <- maxVal
+
+topgenes <- names(gam.pval)[1:plotTopNgenes]
+
+heatmapGeneList <- list(
+    "Top_Pseudotime_Variable_Genes" = topgenes
+)
+
+
+###################
+## Make Table
+
+dfOut <- data.frame(gene=names(gam.pval), time_variability_gam_lg10_p_value=display.gam.pval)
+dfOut[["Most_time_variable_genes"]] <- ""
+dfOut[dfOut$gene %in% topgenes, "Most_time_variable_genes"] <- "+"
+
+## Done
+####################
+
+pos <- grep("TFs", names(Obio@dataTableList$referenceList))
+
+if (length(pos > 0)){
+    topgenes.TF <- names(sort(gam.pval, decreasing = FALSE))[names(sort(gam.pval, decreasing = FALSE)) %in% Obio@dataTableList[["referenceList"]]$TFs]
+    topgenes.TF <- topgenes.TF[1:plotTopNgenes]
+    heatmapGeneList[["Top_Pseudotime_Variable_Transcription_Factors"]] <- topgenes.TF
+    dfOut[["Most_time_variable_TFs"]] <- ""
+    dfOut[dfOut$gene %in% topgenes.TF, "Most_time_variable_TFs"] <- "+"
+
+} else {
+    topgenes.TF <- 0
+}
+
+#########################################
+## Add average expression column
+
+###############################################################################
+## Add percentage expressed genes                                            ##
+DefaultAssay(OsC) <- "RNA"
+my_genes <- rownames(x = OsC@assays$RNA)
+
+exp <- FetchData(OsC, my_genes)
+
+ExprMatrix <- round(as.matrix(colMeans(exp  > 0)) *100,1)
+colnames(ExprMatrix)[1] <- "Percent_cells_expressing"
+dfExprMatrix <- data.frame(ExprMatrix)
+dfExprMatrix[["gene"]] <- row.names(dfExprMatrix)
+
+dfExprMatrix <- dfExprMatrix[dfExprMatrix$gene %in% dfOut$gene, ]
+
+dfOut <- dplyr::full_join(
+    dfOut,
+    dfExprMatrix,
+    by="gene"
+)
+
+dfOutDisplay <- dfOut[dfOut$Percent_cells_expressing >= 10, ]
+
+##
+#########################################
+
+#########################################
+## Write to Excel 
+if (!dir.exists(Obio@parameterList[["reportTableDir"]])){
+  dir.create(Obio@parameterList[["reportTableDir"]])
+}
+
+baseFN <- paste0(
+   Obio@parameterList$project_id, 
+   ".", pseudotimeLineageName,
+   ".var.table.xlsx"
+)
+
+
+outPutFN <- paste0(
+     Obio@parameterList$reportTableDir,
+     baseFN
+)
+  
+ 
+FNrel <- paste0("report_tables/", baseFN)
+
+wb <- openxlsx::createWorkbook()
+
+hs1 <- openxlsx::createStyle(
+    fontColour = "#ffffff",
+    fgFill = "#000000",
+    halign = "CENTER",
+    textDecoration = "Bold"
+)
+sheetName <- substr("Lineage_1",1,30)
+  
+openxlsx::addWorksheet(
+    wb, 
+    sheetName = sheetName
+)
+  
+openxlsx::freezePane(wb, sheetName ,  firstActiveRow = 2)
+sheetN=1
+openxlsx::writeData(wb, sheetN, dfOut, startRow = 1, startCol = 1, headerStyle = hs1)
+openxlsx::saveWorkbook(
+  wb, 
+  outPutFN , 
+  overwrite = TRUE
+)
+
+## Create table download option ##
+#FNbase <- paste0(Obio@parameterList$project_id, "_Pseudotime_Variable_Genes.xlsx")
+#FN <- paste0(Obio@parameterList$reportTableDir, FNbase)
+#FNrel <- paste0("report_tables/", FNbase)
+tabDownloadLink <- paste0("This table list all potentially time-variable genes in this trajectory [here](",FNrel,")")
+tabLegend = paste0(
+    "**Table: ** Time-variable genes in this trajectory. ",
+    tabDownloadLink
+)
+chnkVec <- paste0(
+        #"#### ", names(dtList),
+        "\n```{r PT_var_datatable, results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",
+        tabLegend,"'}\n",
+        "\n",
+        "\n DT::datatable(dfOutDisplay,rownames = FALSE,  escape = FALSE)",
+        "\n cat(  '\n')",
+        "\n\n\n```\n"   
+    )
+tabVar <- "### Table Time-variable Genes"
+
+
+
+##
+###############################################################################
+
+###############################################################################
+## Gene list to plot                                                         ##
+
+
+heatmapGeneListAdditions <- list(
+    "Custom_GeneSet_Branch_2" = c(
+    "KRT15",
+    "KRT19",
+    "PRRX1",
+    "ARID5B",
+    "FN1",
+    "IFITM3",
+    "HES1",
+    "CEBPD",
+    "ZFP36L2",
+    "CLU",
+    "S100A14",
+    "CSTB",
+    "PLTP",
+    "CTSV",
+    "SCX",
+    "LY75",
+    "PRSS16",
+    "TBATA",
+    "CCL25",
+    "GNG11",
+    "PSMB11"
+)
+)
+
+heatmaGeneList <- do.call(c, list(heatmapGeneList, heatmapGeneListAdditions))
+ 
+```
+
+`r tabVar`
+```{r render_QCTable, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"}
+    cat(paste(knitr::knit(text = chnkVec, quiet = T), collapse = '\n'))
+```
+
+
+```{r ouija_heatmaps_part2, eval=TRUE, echo=F, results=F}
+
+
+###############################################################################
+## Init Plot Collection                                                      ##
+
+plotList <- list()
+chnkVec <- as.vector(NULL, mode = "character")
+
+## Done                                                                      ##
+###############################################################################
+
+for (i in 1:length(heatmapGeneList)){
+    ## Relative Heatmap
+    tag <- paste0(names(heatmapGeneList)[i], "_", pseudotimeLineageName,"_relative")
+    plotList[[tag]] <- createLineageHeatmap(
+    OsC,  
+    lineageSelection = NULL,
+    pseudotimeLineageName = pseudotimeLineageName,
+    heatmapGeneVec = heatmapGeneList[[i]],
+    clusterRows = TRUE
+    )
+ 
+    ## Save to file ##
+    FNbase <- paste0(tag, VersionPdfExt)
+    FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+    FNrel <- paste0("report_figures/", FNbase)
+    
+    
+    pdf(FN)
+        print(plotList[[tag]])
+    dev.off()
+    
+    
+    
+    ## Create R markdown chunk ##
+    figLegend <- paste0(
+        '**Figure ', 
+        figureCount, 
+        '**: Heatmap (relative values) ',tag,
+        '. Download a pdf of this figure <a href="',FNrel,'" target="_blank">here</a>. '
+    )
+    figureCount <- figureCount + 1 
+    
+    NewChnk <- paste0(
+        "\n#### ", tag, 
+        "\n```{r ", tag, ", results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",
+        figLegend,"'}\n",
+        "\n",
+        "\n print(plotList[['",tag,"']])",
+        "\n cat(  '\n')",
+        "\n\n\n```\n"   
+    )
+    
+    chnkVec <- c(
+        chnkVec,
+        NewChnk
+    )
+    
+    ## Absolute Heatmap
+    tag <- paste0(names(heatmapGeneList)[i], "_", pseudotimeLineageName, "_absolute")
+    plotList[[tag]] <- createLineageHeatmap(
+        OsC,  
+        lineageSelection = NULL,
+        pseudotimeLineageName = pseudotimeLineageName,
+        heatmapGeneVec = heatmapGeneList[[i]],
+        clusterRows = TRUE,
+        #plotTopNgenes = 100,
+        plotAbsoluteValues = TRUE,  # otherwise: relative
+        highColor = "#00008B",
+        #midColor = "#fffbbc",
+        lowColor = "#d3d3d3"
+    )
+ 
+    ## Save to file ##
+    FNbase <- paste0(tag, VersionPdfExt)
+    FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+    FNrel <- paste0("report_figures/", FNbase)
+    
+    
+    pdf(FN)
+        print(plotList[[tag]])
+    dev.off()
+    
+    
+    
+    ## Create R markdown chunk ##
+    figLegend <- paste0(
+        '**Figure ', 
+        figureCount, 
+        '**: Heatmap ',tag,
+        '. Download a pdf of this figure <a href="',FNrel,'" target="_blank">here</a>. '
+    )
+    figureCount <- figureCount + 1 
+    
+    NewChnk <- paste0(
+        "\n#### ", tag, 
+        "\n```{r ", tag, ", results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",
+        figLegend,"'}\n",
+        "\n",
+        "\n print(plotList[['",tag,"']])",
+        "\n cat(  '\n')",
+        "\n\n\n```\n"   
+    )
+    
+    chnkVec <- c(
+        chnkVec,
+        NewChnk
+    )
+    
+    
+    ## Done                                                                      ##
+    ###############################################################################
+}
+
+if (length(plotList) > 3){
+    tabVar <- ".tabset .tabset-fade .tabset-dropdown"
+} else {
+    tabVar <- ".tabset .tabset-fade .tabset-pills"
+}
+
+```
+
+### Heatmaps Branch 2 {`r tabVar`}
+```{r hm_main_branch1, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"} 
+
+cat(paste(knitr::knit(text = chnkVec, quiet = T), collapse = '\n'))
+
+``` 
+
+
+```{r branch_3_plots, eval=TRUE, echo=F, results=F}
+###############################################################################
+## Subset to relevant trajectory                                             ##
+## Export Pseudotime to Seurat object ##
+# Clusters Polykeratins (5) > mTecDiff (12) > mTec MYO (8)
+branch3 <- c(5, 12, 8)
+
+lineageSelection = branch3
+
+OsC <- subset(x = OsC_store, subset = seurat_clusters %in% lineageSelection )
+
+pseudotimeLineageName <- "Pseudotime_MC_Lineage_3"
+
+
+##                                                                           ##
+###############################################################################
+
+
+
+###############################################################################
+## Init Plot Collection                                                      ##
+
+plotList <- list()
+chnkVec <- as.vector(NULL, mode = "character")
+
+## Done                                                                      ##
+###############################################################################
+
+if (length(plotList) > 3){
+    tabVar <- ".tabset .tabset-fade .tabset-dropdown"
+} else {
+    tabVar <- ".tabset .tabset-fade .tabset-pills"
+}
+
+###############################################################################
+## Find most variable genes in trajectory                                    ##
+
+plotTopNgenes <- 100
+
+Y <- data.matrix( OsC@assays[["RNA"]]@data)
+        
+Y <-  Y[OsC@assays$integrated@var.features,]
+        
+t <- OsC@meta.data[,pseudotimeLineageName]
+        
+# Fit GAM for each gene using pseudotime as independent variable.
+        
+gam.pval <- apply(Y, 1, function(z){
+    d <- data.frame(z=z, t=t)
+    tmp <- gam::gam(z ~ gam::lo(t), data=d)
+    p <- summary(tmp)[4][[1]][1,5]
+    p
+})
+
+
+gam.pval <- sort(gam.pval, decreasing = FALSE)
+gam.pval <- gam.pval[gam.pval < 0.01]
+gam.pval <- sort(gam.pval, decreasing=FALSE)
+
+
+display.gam.pval <- -1*log10(gam.pval)
+maxVal <- max(display.gam.pval[display.gam.pval < Inf])
+display.gam.pval[display.gam.pval == Inf] <- maxVal
+
+topgenes <- names(gam.pval)[1:plotTopNgenes]
+
+heatmapGeneList <- list(
+    "Top_Pseudotime_Variable_Genes" = topgenes
+)
+
+
+###################
+## Make Table
+
+dfOut <- data.frame(gene=names(gam.pval), time_variability_gam_lg10_p_value=display.gam.pval)
+dfOut[["Most_time_variable_genes"]] <- ""
+dfOut[dfOut$gene %in% topgenes, "Most_time_variable_genes"] <- "+"
+
+## Done
+####################
+
+pos <- grep("TFs", names(Obio@dataTableList$referenceList))
+
+if (length(pos > 0)){
+    topgenes.TF <- names(sort(gam.pval, decreasing = FALSE))[names(sort(gam.pval, decreasing = FALSE)) %in% Obio@dataTableList[["referenceList"]]$TFs]
+    topgenes.TF <- topgenes.TF[1:plotTopNgenes]
+    heatmapGeneList[["Top_Pseudotime_Variable_Transcription_Factors"]] <- topgenes.TF
+    dfOut[["Most_time_variable_TFs"]] <- ""
+    dfOut[dfOut$gene %in% topgenes.TF, "Most_time_variable_TFs"] <- "+"
+
+} else {
+    topgenes.TF <- 0
+}
+
+#########################################
+## Add average expression column
+
+###############################################################################
+## Add percentage expressed genes                                            ##
+DefaultAssay(OsC) <- "RNA"
+my_genes <- rownames(x = OsC@assays$RNA)
+
+exp <- FetchData(OsC, my_genes)
+
+ExprMatrix <- round(as.matrix(colMeans(exp  > 0)) *100,1)
+colnames(ExprMatrix)[1] <- "Percent_cells_expressing"
+dfExprMatrix <- data.frame(ExprMatrix)
+dfExprMatrix[["gene"]] <- row.names(dfExprMatrix)
+
+dfExprMatrix <- dfExprMatrix[dfExprMatrix$gene %in% dfOut$gene, ]
+
+dfOut <- dplyr::full_join(
+    dfOut,
+    dfExprMatrix,
+    by="gene"
+)
+
+dfOutDisplay <- dfOut[dfOut$Percent_cells_expressing >= 10, ]
+
+##
+#########################################
+
+#########################################
+## Write to Excel 
+if (!dir.exists(Obio@parameterList[["reportTableDir"]])){
+  dir.create(Obio@parameterList[["reportTableDir"]])
+}
+
+baseFN <- paste0(
+   Obio@parameterList$project_id, 
+   ".", pseudotimeLineageName,
+   ".var.table.xlsx"
+)
+
+
+outPutFN <- paste0(
+     Obio@parameterList$reportTableDir,
+     baseFN
+)
+  
+ 
+FNrel <- paste0("report_tables/", baseFN)
+
+wb <- openxlsx::createWorkbook()
+
+hs1 <- openxlsx::createStyle(
+    fontColour = "#ffffff",
+    fgFill = "#000000",
+    halign = "CENTER",
+    textDecoration = "Bold"
+)
+sheetName <- substr("Lineage_1",1,30)
+  
+openxlsx::addWorksheet(
+    wb, 
+    sheetName = sheetName
+)
+  
+openxlsx::freezePane(wb, sheetName ,  firstActiveRow = 2)
+sheetN=1
+openxlsx::writeData(wb, sheetN, dfOut, startRow = 1, startCol = 1, headerStyle = hs1)
+openxlsx::saveWorkbook(
+  wb, 
+  outPutFN , 
+  overwrite = TRUE
+)
+
+## Create table download option ##
+#FNbase <- paste0(Obio@parameterList$project_id, "_Pseudotime_Variable_Genes.xlsx")
+#FN <- paste0(Obio@parameterList$reportTableDir, FNbase)
+#FNrel <- paste0("report_tables/", FNbase)
+tabDownloadLink <- paste0("This table list all potentially time-variable genes in this trajectory [here](",FNrel,")")
+tabLegend = paste0(
+    "**Table: ** Time-variable genes in this trajectory. ",
+    tabDownloadLink
+)
+chnkVec <- paste0(
+        #"#### ", names(dtList),
+        "\n```{r PT_var_datatable, results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",
+        tabLegend,"'}\n",
+        "\n",
+        "\n DT::datatable(dfOutDisplay,rownames = FALSE,  escape = FALSE)",
+        "\n cat(  '\n')",
+        "\n\n\n```\n"   
+    )
+tabVar <- "### Table Time-variable Genes"
+
+
+
+##
+###############################################################################
+
+###############################################################################
+## Gene list to plot                                                         ##
+
+
+heatmapGeneListAdditions <- list(
+    "Custom_GeneSet_Branch_3" = c(
+    "HES1",
+    "CEBPD",
+    "ZFP36L2",
+    "CLU",
+    "KRT15",
+    "KRT19",
+    "FN1",
+    "IFITM3",
+    "CCL19",
+    "PRRX1",
+    "ARID5B",
+    "HEY1",
+    "ASCL1",
+    "CLDN3",
+    "CLDN4",
+    "CLDN9",
+    "CD24",
+    "EpCAM",
+    "HES6",
+    "NELL1",
+    "UCP2",
+    "FNDC5",
+    "ZEB2",
+    "CKB",
+    "FRMD3",
+    "MEGF10",
+    "RBP1",
+    "NNAT",
+    "DBN1",
+    "MYOG",
+    "KLHL41",
+    "TPM2",
+    "MYL4",
+    "ACTC1",
+    "MYH3",
+    "TNNT3",
+    "TNNT2",
+    "TNNT1",
+    "ACTA1",
+    "NES",
+    "NEXN",
+    "TTN",
+    "MEF2C",
+    "MEG3",
+    "ARPP21",
+    "LRRN1",
+    "HSPB3",
+    "MYLPF",
+    "TNNC1"
+)
+)
+
+heatmaGeneList <- do.call(c, list(heatmapGeneList, heatmapGeneListAdditions))
+ 
+```
+
+`r tabVar`
+```{r render_table3, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"}
+    cat(paste(knitr::knit(text = chnkVec, quiet = T), collapse = '\n'))
+```
+
+
+```{r mc_heatmaps_part3, eval=TRUE, echo=F, results=F}
+
+
+###############################################################################
+## Init Plot Collection                                                      ##
+
+plotList <- list()
+chnkVec <- as.vector(NULL, mode = "character")
+
+## Done                                                                      ##
+###############################################################################
+
+for (i in 1:length(heatmapGeneList)){
+    ## Relative Heatmap
+    tag <- paste0(names(heatmapGeneList)[i], "_", pseudotimeLineageName,"_relative")
+    plotList[[tag]] <- createLineageHeatmap(
+    OsC,  
+    lineageSelection = NULL,
+    pseudotimeLineageName = pseudotimeLineageName,
+    heatmapGeneVec = heatmapGeneList[[i]],
+    clusterRows = TRUE
+    )
+ 
+    ## Save to file ##
+    FNbase <- paste0(tag, VersionPdfExt)
+    FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+    FNrel <- paste0("report_figures/", FNbase)
+    
+    
+    pdf(FN)
+        print(plotList[[tag]])
+    dev.off()
+    
+    
+    
+    ## Create R markdown chunk ##
+    figLegend <- paste0(
+        '**Figure ', 
+        figureCount, 
+        '**: Heatmap (relative values) ',tag,
+        '. Download a pdf of this figure <a href="',FNrel,'" target="_blank">here</a>. '
+    )
+    figureCount <- figureCount + 1 
+    
+    NewChnk <- paste0(
+        "\n#### ", tag, 
+        "\n```{r ", tag, ", results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",
+        figLegend,"'}\n",
+        "\n",
+        "\n print(plotList[['",tag,"']])",
+        "\n cat(  '\n')",
+        "\n\n\n```\n"   
+    )
+    
+    chnkVec <- c(
+        chnkVec,
+        NewChnk
+    )
+    
+    ## Absolute Heatmap
+    tag <- paste0(names(heatmapGeneList)[i], "_", pseudotimeLineageName, "_absolute")
+    plotList[[tag]] <- createLineageHeatmap(
+        OsC,  
+        lineageSelection = NULL,
+        pseudotimeLineageName = pseudotimeLineageName,
+        heatmapGeneVec = heatmapGeneList[[i]],
+        clusterRows = TRUE,
+        #plotTopNgenes = 100,
+        plotAbsoluteValues = TRUE,  # otherwise: relative
+        highColor = "#00008B",
+        #midColor = "#fffbbc",
+        lowColor = "#d3d3d3"
+    )
+ 
+    ## Save to file ##
+    FNbase <- paste0(tag, VersionPdfExt)
+    FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+    FNrel <- paste0("report_figures/", FNbase)
+    
+    
+    pdf(FN)
+        print(plotList[[tag]])
+    dev.off()
+    
+    
+    
+    ## Create R markdown chunk ##
+    figLegend <- paste0(
+        '**Figure ', 
+        figureCount, 
+        '**: Heatmap ',tag,
+        '. Download a pdf of this figure <a href="',FNrel,'" target="_blank">here</a>. '
+    )
+    figureCount <- figureCount + 1 
+    
+    NewChnk <- paste0(
+        "\n#### ", tag, 
+        "\n```{r ", tag, ", results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",
+        figLegend,"'}\n",
+        "\n",
+        "\n print(plotList[['",tag,"']])",
+        "\n cat(  '\n')",
+        "\n\n\n```\n"   
+    )
+    
+    chnkVec <- c(
+        chnkVec,
+        NewChnk
+    )
+    
+    
+    ## Done                                                                      ##
+    ###############################################################################
+}
+
+if (length(plotList) > 3){
+    tabVar <- ".tabset .tabset-fade .tabset-dropdown"
+} else {
+    tabVar <- ".tabset .tabset-fade .tabset-pills"
+}
+
+```
+
+### Heatmaps Branch 3 {`r tabVar`}
+```{r hm_main_branch3, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"} 
+
+cat(paste(knitr::knit(text = chnkVec, quiet = T), collapse = '\n'))
+
+``` 

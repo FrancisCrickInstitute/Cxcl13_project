@@ -1,0 +1,4 @@
+"sampleID"	"sampleName"	"sampleColor"
+"Biotin24hFilt"	"Biotin24hFilt"	"#F8766D"
+"Biotin7dFilt"	"Biotin7dFilt"	"#00BA38"
+"CXCL13ICPE24hFilt"	"CXCL13ICPE24hFilt"	"#619CFF"

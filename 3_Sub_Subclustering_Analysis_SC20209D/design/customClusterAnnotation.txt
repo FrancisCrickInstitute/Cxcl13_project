@@ -1,0 +1,4 @@
+seurat_clusters	clusterName	clusterColor	clusterOrder
+0	Peripheral_LZ	#F8766D	1
+1	Central_LZ	#00BA38	2
+2	DZ	#619CFF	3

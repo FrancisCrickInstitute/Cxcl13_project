@@ -1,0 +1,267 @@
+<!-- Set PArameters Module -->
+<!-- Set the chnkPrefix to make all chunks unique in the overall folder -->
+```{r partB_make_cluster_table, echo=TRUE, eval=TRUE, warning=FALSE}
+chnkPrefix <- "partB.cluster.table."
+VersionPdfExt <- VersionPdfExt <- paste0(".",chnkPrefix,"V", gsub("-", "", Sys.Date()), ".pdf")
+
+```
+
+
+
+```{r ClusterTable_data_prep, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"}
+library(DT)
+
+###############################################################################
+## Calculate percentages of expressed genes                                  ##
+DefaultAssay(OsC) <- "RNA"
+my_genes <- rownames(x = OsC@assays$RNA)
+
+exp <- FetchData(OsC, my_genes)
+
+ExprMatrix <- round(as.matrix(colMeans(exp  > 0)) *100,1)
+colnames(ExprMatrix)[1] <- "count_cut_off"
+dfExprMatrix <- data.frame(ExprMatrix)
+dfExprMatrix[["gene"]] <- row.names(dfExprMatrix)
+
+Obio@dataTableList[["dfPercCellsExpr"]] <- dfExprMatrix
+
+## Done calculating percentages of expressed gens                            ##
+###############################################################################
+
+###############################################################################
+## Create one table per cluster                                              ##
+## Add expressed in N percent cells ##
+dfPercCellsExpr <- Obio@dataTableList$dfPercCellsExpr
+
+dfDat <- Obio@dataTableList$dfGeneralMarkersFilt
+
+
+
+dfDat$avg_diff <- round(dfDat$avg_diff,2)
+dfDat <- dfDat[,c("cluster",  "gene", "avg_diff", "power")]
+names(dfDat) <- gsub("avg_diff", "DGE_avg_diff", names(dfDat))
+names(dfDat) <- gsub("power", "DGE_power", names(dfDat))
+dfDat[["join_col"]] <- paste0(dfDat$gene, "_",dfDat$cluster)
+dfDat$cluster <- NULL
+dfDat$gene <- NULL
+
+## Add residual results ##
+dfClusterResiduals <- Obio@dataTableList$dfClusterResiduals
+
+
+library(tidyverse)
+dfLongResiduals <- data.frame(
+    dfClusterResiduals %>% pivot_longer(!gene, names_to = "cluster", values_to = "residuals")
+)
+
+
+###############################################################################
+## Calculate Coefficient of variation for no-cluster X genes to find best unique cluster markers
+
+## Done                                                                      ##
+###############################################################################
+
+
+dfRegMins <- data.frame(dfLongResiduals %>% group_by(cluster) %>%   top_n(10, residuals) %>% summarize(min10 = min(residuals)))
+
+## Select as cut-off: median of all so at least half the cluster have 10 marker genes
+cutOff <- median(dfRegMins$min10)
+if (cutOff > 1){
+    cutOff <- 1
+}
+
+dfLongResiduals <- dfLongResiduals[dfLongResiduals$residuals > cutOff, ]
+
+
+dfLongResiduals$cluster <- gsub("_Residuals", "", dfLongResiduals$cluster)
+
+dfLongResiduals[["join_col"]] <- paste0(
+  dfLongResiduals$gene, 
+  "_", 
+  dfLongResiduals$cluster
+)
+
+dfLongResiduals$gene <- NULL
+dfLongResiduals$cluster <- NULL
+
+dfDat <- merge(
+  dfDat, 
+  dfLongResiduals, 
+  by.x = "join_col",
+  by.y = "join_col",
+  all =TRUE
+)
+
+dfDat[is.na(dfDat)] <- 0
+names(dfDat) <- gsub("residuals", "LinearReg_Residuals", names(dfDat))
+dfDat <- dfDat[order(dfDat$LinearReg_Residuals, decreasing = T),]
+dfDat[["gene"]] <- sapply(
+  dfDat$join_col, function(x) unlist(strsplit(x, "_"))[1]
+)
+
+dfDat[["Cluster"]] <- ""
+for (n in 1:nrow(dfDat)){
+    dfDat[n, "Cluster"] <- gsub(paste0(dfDat[n,"gene"], "_"), "", dfDat[n, "join_col"])
+}
+
+dfDat$join_col <- NULL
+
+dfDat$gene <- substr(dfDat$gene,1,50)
+
+dfDat[["uniqueMarker"]] <- as.character(!duplicated(dfDat$gene))
+dfDat$uniqueMarker <- substr(dfDat$uniqueMarker, 1,1)
+
+#######################
+## Add cluster name
+h <- sum(c("clusterName", "clusterColor") %in% names(OsC@meta.data))
+if (sum(h) == 2){
+    dfClust <- unique(OsC@meta.data[,c("seurat_clusters", "clusterName", "clusterColor")])
+
+    dfDat <- merge(
+        dfDat,
+        dfClust,
+        by.x = "Cluster",
+        by.y = "clusterName"
+    )
+}
+
+## Done cluster name
+########################
+dfDat$Cluster <- paste0("Cluster_", dfDat$Cluster, "_C")
+
+dtList <- list()
+
+tabClusters <- sort(unique(dfDat$clusterName))
+chnkVec <- as.vector(NULL, mode="character")
+    
+linkGeneView <- paste0('<a href="https://',urlString,'/',Obio@parameterList$project_id,'/gene-view" target = "_blank">GeneView</a>')
+linkFeatureView <- paste0('<a href="https://',urlString,'/mdata/',Obio@parameterList$project_id,'/html/FeatureView.html" target="_blank">FeatureView</a>')
+
+## Save workbook ##
+    baseFN <- paste0(
+       Obio@parameterList$project_id, 
+       ".Cluster.marker.table.xlsx"
+    )
+    FNtabrel <- paste0("report_figures/", baseFN)
+
+    tablink <- paste0('An Excel table containing the cluster marker genes can be downloaded <a href = "',FNtabrel,'">here</a>. ')
+
+#for (i in 1:length(tabClusters)){
+    #tabLegend = paste0("**Table: ** Positive and negative marker genes for ", tabClusters[i])
+    tabLegend = paste0("**Table: ** Positive and negative cluster-defining marker genes. Perc_Cells_Expr: Percentage of total cells expressing gene X. Enr in Cluster: Enrichment of gene X in cluster Y. To collapse the table to one particular cluster, type the name of the cluster in the search box.",
+    "Use the ",linkGeneView," or ",linkFeatureView," functionalities to examine individual genes in more detail. ",tablink                   
+    )
+    
+    
+    
+    
+    #dfTempDat <- dfDat[dfDat$cluster == tabClusters[i],]
+    dfTempDat <- dfDat
+    
+    ## Percent expressed genes 
+    dfTempDat <- merge(
+        dfTempDat, 
+        Obio@dataTableList$dfPercCellsExpr,
+        by.x = "gene",
+        by.y = "gene"
+    )
+    
+    names(dfTempDat) <- gsub("count_cut_off", "Perc_Cells_Expr",names(dfTempDat))
+    names(dfTempDat) <- gsub("myAUC", "AUC", names(dfTempDat))
+    names(dfTempDat) <- gsub("[.]", "", names(dfTempDat))
+    
+    #dtList[[paste0("Table",i)]] <- datatable(dfDat,rownames = FALSE) 
+    if (Obio@parameterList$host == "10.27.241.234"){
+      urlString <- "biologic.thecrick.org"
+    } else {
+      urlString <- "biologic.crick.ac.uk"
+    }
+    
+    dfTempDat[["ClusterName"]] <- paste0(
+        '<p style="background-color:',dfTempDat$clusterColor,';text-align:center">',dfTempDat$Cluster,'</p>'
+    ) 
+    
+    orderVec <- c('gene','ClusterName','DGE_avg_diff','DGE_power','LinearReg_Residuals','uniqueMarker','Cluster','Perc_Cells_Expr')
+    orderVec <- orderVec[orderVec %in% names(dfTempDat)]
+    dfTempDat <- dfTempDat[,orderVec]
+    dfOutput <- dfTempDat
+    
+    dfTempDat$gene <- paste0('<a href="https://',urlString,'/',Obio@parameterList$project_id,'/gene-view?query=',dfTempDat$gene,'&exact=TRUE" target="_blank">', dfTempDat$gene, '</a>')
+    
+    NewChnk <- paste0(
+        "#### ", names(dtList),
+        "\n```{r datatable_",
+        i,", results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",
+        tabLegend,"'}\n",
+        "\n",
+        "\n datatable(dfTempDat,rownames = FALSE,  escape = FALSE)",
+        "\n cat(  '\n')",
+        "\n\n\n```\n"   
+    )
+    
+    chnkVec <- c(
+            chnkVec,
+            NewChnk
+        )
+#}
+
+##############################################################################
+## Create marker gene table Excel                                           ##
+###############################################################################
+## Assemble DGE summary table                                                ##
+library(openxlsx)
+wb <- createWorkbook()
+
+hs1 <- createStyle(
+    fontColour = "#ffffff",
+    fgFill = "#000000",
+    halign = "CENTER",
+    textDecoration = "Bold"
+)
+
+sheetName <- "Cluster_Marker_Genes"
+  
+  addWorksheet(
+      wb, 
+      sheetName = sheetName
+  )
+  
+  
+  freezePane(wb, sheetName ,  firstActiveRow = 2)
+  writeData(wb, 1, dfOutput, startRow = 1, startCol = 1, headerStyle = hs1)
+  ## Done adding to Excel workbook ##
+  
+
+
+## Save workbook ##
+baseFN <- paste0(
+   Obio@parameterList$project_id, 
+   ".Cluster.marker.table.xlsx"
+)
+FNtabrel <- paste0("report_figures/", baseFN)
+
+outPutFN <- paste0(
+     Obio@parameterList$reportTableDir,
+     baseFN
+)
+
+saveWorkbook(
+        wb,
+        outPutFN ,
+        overwrite = TRUE
+)
+    
+## Done creating marker gene table                                          ##
+##############################################################################
+    
+## Done creating one table per cluster                                      ##
+##############################################################################
+```
+
+### Cluster-defining Genes Table {.tabset .tabset-fade .tabset-pills}
+
+```{r render_ClusterTable, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"}
+
+cat(paste(knit(text = chnkVec, quiet = T), collapse = '\n'))
+
+```

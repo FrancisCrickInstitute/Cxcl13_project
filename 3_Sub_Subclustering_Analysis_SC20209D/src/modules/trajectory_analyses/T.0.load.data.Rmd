@@ -1,0 +1,140 @@
+<!-- Set Parameters Module -->
+<!-- Set the chnkPrefix to make all chunks unique in the overall folder -->
+```{r partT_create_integrated_Seurat_object_init, echo=TRUE, eval=TRUE, warning=FALSE}
+chnkPrefix <- "T0.load.data."
+VersionPdfExt <- VersionPdfExt <- paste0(".",chnkPrefix,"V", gsub("-", "", Sys.Date()), ".pdf")
+
+## Use conda activate R-monocle3;R
+
+## renv
+
+
+
+```
+
+
+### Load Data
+```{r B3_partB_create_sample_list, echo=TRUE, eval=TRUE, warning=FALSE, results=F}
+
+# devtools::install_github('rstudio/renv')
+
+VersionPdfExt <- paste0(".V", gsub("-", "", Sys.Date()), ".pdf")
+
+if (dir.exists("/Volumes/babs/working/boeings/")){
+  hpc.mount <- "/Volumes/babs/working/boeings/"
+} else if (dir.exists("Y:/working/boeings/")){
+  hpc.mount <- "Y:/working/boeings/"
+} else if (dir.exists("/camp/stp/babs/working/boeings/")){
+  hpc.mount <- "/camp/stp/babs/working/boeings/"
+} else {
+  hpc.mount <- ""
+}
+
+
+FN <- paste0(hpc.mount, "Projects/reference_data/documentation/BC.parameters.txt")
+dbTable <- read.delim(
+  FN, 
+  sep = "\t",
+  stringsAsFactors = F
+)
+
+db.pwd <- as.vector(dbTable[1,1])
+
+figureCount <- 1
+
+# Assess installed packages
+
+
+###############################################################################
+## Load Obio object from step A                                              ##
+ObioFN <- paste0(
+    tempWorkDir, "/", 
+    list.files(tempWorkDir)[grep(".bioLOGIC.Robj", list.files(tempWorkDir))]
+)
+
+load(ObioFN)
+
+
+checkFile = paste0(
+  Obio@parameterList$project_id,
+  ".bioLOGIC.Robj"
+)
+
+
+Obio <- setMountingPoint(Obio)
+Obio <- setAnalysisPaths(Obio)
+Obio <- setCrickGenomeAndGeneNameTable(Obio)
+Obio <- createAnalysisFolders(
+  Obio
+)
+Obio <- setDataBaseParameters(Obio)
+
+###############################################################################
+## SB local libpaths                                                         ##
+## Set filename for temp pdf files ##
+Obio@parameterList$reportFigDir
+
+pos <- grep("reportTableDir", names(Obio@parameterList))
+if (length(pos) == 0){
+    Obio@parameterList[["reportTableDir"]] <- gsub("report_figures", "report_tables", Obio@parameterList$reportFigDir)
+}
+
+# if (length(.libPaths()) > 2){
+#     .libPaths(.libPaths()[2:3])
+# }
+## Done                                                                      ##
+###############################################################################
+
+
+ObioFN <- paste0(
+    tempWorkDir, "/", 
+    list.files(tempWorkDir)[grep(".Seurat.Robj", list.files(tempWorkDir))]
+)
+
+load(ObioFN)
+
+
+
+## Create url string
+if (Obio@parameterList$host == "10.27.241.234"){
+  urlString <- "biologic.thecrick.org"
+} else {
+  urlString <- "biologic.crick.ac.uk"
+}
+
+legendDotSize <- 5
+
+
+shinyURL <- paste0(
+  "https://shiny-bioinformatics.crick.ac.uk/shiny/boeings/",
+  Obio@parameterList$project_id,
+  "_app/"
+)            
+
+
+## Set file paths ##
+baseFN <- paste0(
+  Obio@parameterList$project_id, 
+  ".trajectory.table.xlsx"
+)
+
+
+outPutFN <- paste0(
+  Obio@parameterList$reportTableDir,
+  baseFN
+)
+
+
+FNrel <- paste0("report_tables/", baseFN)
+
+
+## Create table link string ##
+
+tableLink <- paste0('<a href="https://',urlString,'/mdata/',Obio@parameterList$project_id, '/html/', FNrel,' target="_blank">here</a>')  
+
+tableString <- paste0('An Excel table with the DGE results can be downloaded ',
+                      tableLink
+)
+
+
+```

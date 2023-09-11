@@ -1,0 +1,133 @@
+<!-- Set PArameters Module -->
+<!-- Set the chnkPrefix to make all chunks unique in the overall folder -->
+```{r doublet_finder_init, echo=TRUE, eval=TRUE, warning=FALSE}
+chnkPrefix <- "QC.A.run.doublet.finder."
+VersionPdfExt <- VersionPdfExt <- paste0(".",chnkPrefix,"V", gsub("-", "", Sys.Date()), ".pdf")
+
+
+runDoubletFinder <- TRUE
+
+```
+
+
+
+```{r DF_data, echo=runDoubletFinder, eval=runDoubletFinder, warning=FALSE, results=F}
+###############################################################################
+## Do percent mt plots                                                       ##
+resList <-  doDF_plotSL(
+    SampleList,
+    obj = Obio,
+    figureCount = figureCount,
+    VersionPdfExt = ".pdf",
+    tocSubLevel = 4,
+    dotsize = 0.5
+)
+    
+ 
+
+plotListDF <- resList$plotListDF
+chnkVec <- resList$chnkVec
+figureCount <- resList$figureCount
+Obio@dataTableList[["DF_resultlist"]] <- resList$addList
+        
+## Done create cellRanger QC plots                                           ##
+###############################################################################
+
+if (length(plotListDF) > 3){
+    tabVar <- "### Plot Per Sample Doublet Estimate .tabset .tabset-fade .tabset-dropdown"
+} else {
+    tabVar <- "### Plot Per Sample Doublet Estimate .tabset .tabset-fade .tabset-pills"
+}
+
+
+```
+
+{`r tabVar`}
+
+```{r Plot_DF, echo=runDoubletFinder, eval=runDoubletFinder, warning=FALSE, results="asis"} 
+
+cat(paste(knitr::knit(text = chnkVec, quiet = T), collapse = '\n'))
+
+```
+
+
+```{r UMAP_percentage, echo=TRUE, eval=TRUE, warning=FALSE, results=F}
+###############################################################################
+## Do percent mt plots                                                       ##
+
+resList <- doUMAP_plot_percMT(
+    SampleList,
+    obj =  Obio,
+    figureCount = figureCount,
+    VersionPdfExt = ".pdf",
+    tocSubLevel = 4,
+    dotsize = 0.5
+)
+ 
+
+plotListUMT <- resList$plotListUMT
+chnkVec <- resList$chnkVec
+figureCount <- resList$figureCount
+
+        
+## Done create cellRanger QC plots                                           ##
+###############################################################################
+
+if (length(plotListUMT) > 3){
+    tabVar <- ".tabset .tabset-fade .tabset-dropdown"
+} else {
+    tabVar <- ".tabset .tabset-fade .tabset-pills"
+}
+
+
+```
+
+### Plot Per Sample MT Percentage {`r tabVar`}
+
+```{r Plot_percent_MT, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"} 
+
+cat(paste(knitr::knit(text = chnkVec, quiet = T), collapse = '\n'))
+
+```
+
+
+```{r UMAP_nFeatures, echo=TRUE, eval=TRUE, warning=FALSE, results=F}
+###############################################################################
+## Do percent mt plots                                                       ##
+
+resList <- doUMAP_plot_nFeatRNA(
+    SampleList,
+    obj =  Obio,
+    figureCount = figureCount,
+    VersionPdfExt = ".pdf",
+    tocSubLevel = 4,
+    dotsize = 0.5
+)
+ 
+
+plotListNC <- resList$plotListNC
+chnkVec <- resList$chnkVec
+figureCount <- resList$figureCount
+
+        
+## Done create cellRanger QC plots                                           ##
+###############################################################################
+
+if (length(plotListNC) > 3){
+    tabVar <- ".tabset .tabset-fade .tabset-dropdown"
+} else {
+    tabVar <- ".tabset .tabset-fade .tabset-pills"
+}
+
+
+```
+
+### Plot Per Sample nFeatures RNA {`r tabVar`}
+
+```{r Plot_nFeatureRNA, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"} 
+
+cat(paste(knitr::knit(text = chnkVec, quiet = T), collapse = '\n'))
+
+```
+
+

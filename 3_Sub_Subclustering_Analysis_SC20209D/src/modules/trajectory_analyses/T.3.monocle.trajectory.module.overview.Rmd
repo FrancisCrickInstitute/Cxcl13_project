@@ -1,0 +1,391 @@
+<!-- Set Parameters Module -->
+<!-- Set the chnkPrefix to make all chunks unique in the overall folder -->
+```{r, echo=TRUE, eval=TRUE, warning=FALSE}
+chnkPrefix <- "T3.mc."
+VersionPdfExt <- VersionPdfExt <- paste0(".",chnkPrefix,"V", gsub("-", "", Sys.Date()), ".pdf")
+
+#install.packages("V8")
+#renv::install("cole-trapnell-lab/leidenbase")
+#renv::install("cole-trapnell-lab/monocle3")
+
+## Requires conda environment as gdal can't be installed. ##
+## remember module purge to flush old R versions
+# list all conda environments
+# conda env list
+
+# conda activate R-monocle3
+# R-version of the above: R 4.0.2
+
+
+invertMonoclePseudotime <- FALSE
+useCachedMonocleObject <- TRUE
+startClusterID <- 1
+startClusterColName <- "seurat_clusters"
+plotTopNgenes <- 100
+nMonocleTimeBins <- 100
+
+```
+  
+  
+  
+```{r, include=FALSE}
+knitr::opts_chunk$set(
+  tidy = TRUE,
+  tidy.opts = list(width.cutoff = 120),
+  message = FALSE,
+  warning = FALSE
+)
+```
+
+
+
+```{r, eval=F, echo=T, results=F}
+## This part will only be run for the data analysis mode
+
+## Tutorial from the Trapnell lab
+# https://github.com/cole-trapnell-lab/monocle-release/issues/388
+
+
+library(Seurat)
+library(monocle3)
+library(htmlwidgets)
+
+## An old version of the matrix package is required
+# install.packages("https://cran.r-project.org/src/contrib/Archive/Matrix/Matrix_1.3-3.tar.gz")
+
+seurat <- OsC
+
+## remove cluster 5 ##
+gene_annotation <- as.data.frame(rownames(seurat@reductions[["pca"]]@feature.loadings), row.names = rownames(seurat@reductions[["pca"]]@feature.loadings))
+colnames(gene_annotation) <- "gene_short_name"
+
+# part two, cell information
+
+cell_metadata <- as.data.frame(seurat@assays[["RNA"]]@counts@Dimnames[[2]], row.names = seurat@assays[["RNA"]]@counts@Dimnames[[2]])
+colnames(cell_metadata) <- "barcode"
+
+# part three, counts sparse matrix
+
+New_matrix <- seurat@assays[["RNA"]]@counts
+New_matrix <- New_matrix[rownames(seurat@reductions[["pca"]]@feature.loadings), ]
+expression_matrix <- New_matrix
+
+
+### Construct the basic cds object
+
+cds_from_seurat <- new_cell_data_set(
+    expression_matrix,
+    cell_metadata = cell_metadata,
+    gene_metadata = gene_annotation
+)
+
+
+### Construct and assign the made up partition 
+###### I DO NOT ADVISE THIS
+
+recreate.partition <- c(rep(1, length(cds_from_seurat@colData@rownames)))
+names(recreate.partition) <- cds_from_seurat@colData@rownames
+recreate.partition <- as.factor(recreate.partition)
+
+cds_from_seurat@clusters@listData[["UMAP"]][["partitions"]] <- recreate.partition
+
+
+### Assign the cluster info
+
+list_cluster <- seurat@meta.data[[sprintf("seurat_clusters")]]
+#list_cluster <- seurat@meta.data[[sprintf("ClusterNames_%s_%sPC", 0.5, 20)]]
+names(list_cluster) <- seurat@assays[["RNA"]]@data@Dimnames[[2]]
+
+cds_from_seurat@clusters@listData[["UMAP"]][["clusters"]] <- list_cluster
+
+
+### Could be a space-holder, but essentially fills out louvain parameters
+
+cds_from_seurat@clusters@listData[["UMAP"]][["louvain_res"]] <- "NA"
+
+
+### Assign UMAP coordinate
+
+## old commented out
+# cds_from_seurat@reducedDims@listData[["UMAP"]] <- seurat@reductions[["umap"]]@cell.embeddings
+
+# replaced with from https://github.com/satijalab/seurat/issues/1658
+cds_from_seurat@int_colData@listData$reducedDims@listData[["UMAP"]] <- seurat@reductions[["umap"]]@cell.embeddings 
+
+### Assign feature loading for downstream module analysis
+
+cds_from_seurat@preprocess_aux$gene_loadings <- seurat@reductions[["pca"]]@feature.loadings
+
+
+### Learn graph, this step usually takes a significant period of time for larger samples
+
+print("Learning graph, which can take a while depends on the sample")
+
+cds_from_seurat <- learn_graph(cds_from_seurat, use_partition = T)
+
+#plot_cells(cds_from_seurat)
+
+####Here I chose to save the gene_metadata, rds, etc.`
+
+
+###############################################################################
+## Calculate pseudotime                                                      ##
+
+# get_earliest_principal_node <- function(cds, time_bin="PF"){
+#   cell_ids <- which(colData(cds)[, "time"] == time_bin)
+#   cell_ids <- colData(cds)$barcode
+#   closest_vertex <-
+#   cds@principal_graph_aux[["UMAP"]]$pr_graph_cell_proj_closest_vertex
+#   closest_vertex <- as.matrix(closest_vertex[colnames(cds), ])
+#   root_pr_nodes <-
+#   igraph::V(principal_graph(cds)[["UMAP"]])$name[as.numeric(names
+#   (which.max(table(closest_vertex[cell_ids,]))))]
+#   root_pr_nodes
+# }
+
+
+
+
+## Set root cells - here polykeratin cluster ##
+root_cells <- as.vector(
+    OsC@meta.data[OsC@meta.data[,startClusterColName] == startClusterID,"cellID"]
+)
+
+closest_vertex <- cds_from_seurat@principal_graph_aux[["UMAP"]]$pr_graph_cell_proj_closest_vertex
+
+root_pr_nodes <-
+  igraph::V(principal_graph(cds_from_seurat)[["UMAP"]])$name[as.numeric(names
+  (which.max(table(closest_vertex[root_cells,]))))]
+
+cds_from_seurat <- order_cells(
+    cds_from_seurat,
+    root_pr_nodes=root_pr_nodes,
+    #root_cells = root_cells
+)
+
+###############################################################################
+## Monocle DGE                                                               ##
+## Reference https://cole-trapnell-lab.github.io/monocle3/docs/differential/
+# time_models <- monocle3::fit_models(
+#     cds_from_seurat,
+#     model_formula_str = "~pseudotime",
+#     expression_family="negbinomial"
+# )
+# 
+# gene_fits <- monocle3::fit_models(cds_from_seurat, model_formula_str = "~embryo.time + batch")
+# fit_coefs <- coefficient_table(gene_fits)
+# fit_coefs %>% filter(term != "(Intercept)") %>%
+#       select(gene_short_name, term, q_value, estimate)
+
+## Correlation tests ##
+# pr_graph_test_res <- monocle3::graph_test(cds_from_seurat, neighbor_graph="knn", cores=8)
+# pr_deg_ids <- row.names(subset(pr_graph_test_res, q_value < 0.05))
+# 
+# ## Find gene modules ##
+# gene_module_df <- monocle3::find_gene_modules(cds_from_seurat[pr_deg_ids,], resolution=1e-2)
+# 
+# cell_group_df <- tibble::tibble(cell=row.names(colData(cds_from_seurat)), 
+#                                 cell_group=partitions(cds_from_seurat)[colnames(cds_from_seurat)])
+# agg_mat <- aggregate_gene_expression(cds_from_seurat, gene_module_df, cell_group_df)
+# row.names(agg_mat) <- stringr::str_c("Module ", row.names(agg_mat))
+# colnames(agg_mat) <- stringr::str_c("Partition ", colnames(agg_mat))
+# 
+# pheatmap::pheatmap(agg_mat, cluster_rows=TRUE, cluster_cols=TRUE,
+#                    scale="column", clustering_method="ward.D2",
+#                    fontsize=6)
+# 
+# 
+# ## Finding genes that change as a function of pseudotime ##
+# ## Requires old version of matrix (< 1.3)
+# cds_pr_test_res <- graph_test(cds_from_seurat, neighbor_graph="principal_graph", cores=4)
+# pr_deg_ids <- row.names(subset(cds_pr_test_res, q_value < 0.05))
+# 
+# ## plot genes in pseudotime ##
+# p1 <- plot_genes_in_pseudotime(cds_from_seurat,
+#                          color_cells_by="clusterName",
+#                          min_expr=0.5)
+# 
+# AFD_genes <- c("ATF3", "KRT19")
+# AFD_lineage_cds <- cds_from_seurat[rowData(cds_from_seurat)$gene_short_name %in% AFD_genes,
+#                        colData(cds_from_seurat)$cell.type %in% c("AFD")]
+# 
+# plot_genes_in_pseudotime(AFD_lineage_cds,
+#                          color_cells_by="pseudotime",
+#                          min_expr=0.5)
+
+## Save single cell object ##
+FN <- paste0(
+    Obio@parameterList$localWorkDir,
+    Obio@parameterList$project_id,
+    ".monocle.SCE.rds"
+)
+
+saveRDS(cds_from_seurat, FN)
+```
+
+```{r, echo=TRUE, eval=TRUE, warning=FALSE, results=F}
+###############################################################################
+## Visualization                                                             ##
+## Load Rds
+FN <- paste0(
+    Obio@parameterList$localWorkDir,
+    Obio@parameterList$project_id,
+    ".monocle.SCE.rds"
+)
+
+cds_from_seurat <- readRDS(FN)
+
+plotList <- list()
+chnkVec <- as.vector(NULL, mode = "character")
+
+
+
+## Export Pseudotime to Seurat object ##
+# Branch 1
+# Clusters Polykeratins (5) > mTecDiff (12) > NEDC_I_NEUROD1 (1) > NEDC_II_NEUROD1 (4) > NEDC_III_SOX2 (2) > NEDC_IV_SOX2 (11)
+# branch1 <- c(5, 12, 1, 4, 2, 11)
+# Branch 2
+# Clusters Polykeratins (5) > cTecDiff (9) > cTECI (0) > cTECIII (6) > cTECII (3)
+# branch2 <- c(5, 9, 0, 6,3)
+# 
+# Branch 3
+# Clusters Polykeratins (5) > mTecDiff (12) > mTec MYO (8)
+# branch3 <- c(5, 12, 8)
+
+traj.coord<- cds_from_seurat@principal_graph_aux@listData[["UMAP"]][["pseudotime"]]
+dfPseudo <- data.frame(cellID = names(traj.coord), Pseudotime_MC = traj.coord)
+
+dfPseudo$cellID <- NULL
+
+## Add to Seurat object ##
+OsC <- biologicToolsSC::addDf2seuratMetaData(
+    OsC, 
+    dfPseudo
+)
+
+OsC@meta.data[is.na(OsC@meta.data)] <- 0
+
+# dfPseudoT2 <- OsC@meta.data[,c("cellID", "seurat_clusters", "Pseudotime_MC")]
+# dfPseudoT2[["Pseudotime_MC_Lineage_1"]] <- 0
+# dfPseudoT2[dfPseudoT2$seurat_clusters %in% branch1, "Pseudotime_MC_Lineage_1"] <- dfPseudoT2[dfPseudoT2$seurat_clusters %in% branch1, "Pseudotime_MC"]
+# 
+# 
+# dfPseudoT2[["Pseudotime_MC_Lineage_2"]] <- 0
+# dfPseudoT2[dfPseudoT2$seurat_clusters %in% branch2, "Pseudotime_MC_Lineage_2"] <- dfPseudoT2[dfPseudoT2$seurat_clusters %in% branch2, "Pseudotime_MC"]
+# 
+# 
+# dfPseudoT2[["Pseudotime_MC_Lineage_3"]] <- 0
+# dfPseudoT2[dfPseudoT2$seurat_clusters %in% branch3, "Pseudotime_MC_Lineage_3"] <- dfPseudoT2[dfPseudoT2$seurat_clusters %in% branch3, "Pseudotime_MC"]
+# 
+# dfPseudoT2$cellID <- NULL 
+# dfPseudoT2$seurat_clusters <- NULL 
+# dfPseudoT2$Pseudotime_MC <- NULL
+
+# OsC <- biologicToolsSC::addDf2seuratMetaData(
+#     OsC, 
+#     dfPseudoT2
+# )
+
+OsC@meta.data[is.na(OsC@meta.data)] <- 0
+
+save(OsC,
+    file = paste0(
+         Obio@parameterList$localWorkDir,
+         Obio@parameterList$project_id,
+        ".Seurat.Robj"
+     )
+)
+
+## Create three pseudotime branches ##
+
+
+## Done                                                                      ##
+###############################################################################
+
+
+tag <- "Monocle_Pseudotime"
+
+plotList[[tag]] <- plot_cells(cds_from_seurat,
+    color_cells_by = "pseudotime",
+    label_cell_groups=FALSE,
+    label_leaves=FALSE,
+    label_branch_points=FALSE,
+    graph_label_size=1.5
+) + ggplot2::theme_bw(
+) +  ggplot2::theme(
+      axis.text.y   = ggplot2::element_text(size=8),
+      axis.text.x   = ggplot2::element_text(size=8),
+      axis.title.y  = ggplot2::element_text(size=8),
+      axis.title.x  = ggplot2::element_text(size=8),
+      axis.line = ggplot2::element_line(colour = "black"),
+      panel.border = ggplot2::element_rect(colour = "black", fill=NA, size=1),
+      plot.title = ggplot2::element_text(hjust = 0.5, size = 12),
+      legend.title = ggplot2::element_blank()
+) + ggplot2::guides(col = ggplot2::guide_legend(override.aes = list(shape = 16, size = legendDotSize))
+) + ggplot2::ggtitle(paste0("Sample: ", gsub("_", " ", tag))
+)
+
+FNbase <- paste0(tag, VersionPdfExt)
+FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+FNrel <- paste0("report_figures/", FNbase)
+
+pdf(FN)
+print(plotList[[tag]])
+dev.off()
+            
+if (exists("shinyURL") & !is.null(shinyURL)){
+    link <- paste0(
+      'An interactive version of this figure with additional viewing options can be found <a href="',shinyURL,'?_inputs_&y_axis=%22UMAP_2%22&x_axis=%22UMAP_1%22&colorBy=%22Pseudotime_MC%22&splitByColumn=%22all%22" target="_blank">here</a>. '
+    )
+} else {
+    link <- ""
+}
+    
+figLegend <- paste0(
+    '**Figure ', 
+    figureCount, 
+    ':** ',
+    ' Monocle pseudotime projection on UMAP. Download a pdf of this figure <a href="',FNrel,'" target="_blank">here</a>. ',
+     link
+)
+
+figureCount <- figureCount + 1
+
+NewChnk <- paste0(
+    "#### ", tag,
+    "\n```{r Sample_UMAP_",
+    tag,", results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",
+    figLegend,"'}\n",
+    "\n",
+    "\n print(plotList[['",tag,"']])",
+    "\n cat(  '\n')",
+    "\n\n\n```\n"   
+)
+
+chnkVec <- c(
+    chnkVec,
+    NewChnk
+)
+
+
+## Done overview plot                                                        ##
+###############################################################################
+
+if (length(plotList) > 2){
+    tabVar <- ".tabset .tabset-fade .tabset-dropdown"
+} else {
+    tabVar <- ".tabset .tabset-fade .tabset-pills"
+}
+
+```
+
+## Overview
+### Monocle Pseudotime Overview {`r tabVar`}
+
+```{r, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"} 
+
+cat(paste(knitr::knit(text = chnkVec, quiet = T), collapse = '\n'))
+
+```
+
+

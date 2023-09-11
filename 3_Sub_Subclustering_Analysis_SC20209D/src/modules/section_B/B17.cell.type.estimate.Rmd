@@ -1,0 +1,118 @@
+<!-- Set PArameters Module -->
+<!-- Set the chnkPrefix to make all chunks unique in the overall folder -->
+```{r partB_cell_type_estimate, echo=TRUE, eval=TRUE, warning=FALSE}
+chnkPrefix <- "partB.cell.type.estimate."
+VersionPdfExt <- VersionPdfExt <- paste0(".",chnkPrefix,"V", gsub("-", "", Sys.Date()), ".pdf")
+
+```
+
+
+
+```{r CellTypePlot_dataprep, echo=TRUE, eval=TRUE, warning=FALSE,  results=F}
+
+###########################
+## Create gmt list
+## Retrieve gmt files from database
+## Add custom gmt files
+library(clusterProfiler)
+library(ggplot2)
+
+gmtList <- list()
+pos <- grep("clusterSigEnrichmentList", slotNames(Obio))
+
+if (length(pos) > 0){
+if (is.null(Obio@clusterSigEnrichmentList)){
+  dbtableList <- list(
+      "Cell Type Signatures" = "mysigdb_sc_sig",
+      "Cell Type Signatures" = "cibersort_L22",
+      "GO-MF" = "mysigdb_c5_MF",
+      "Pathways" = "mysigdb_c2_1329_canonical_pathways",
+      "Allen_Brain_Atlas" = "Allen_Brain_Atlas"
+  )
+} else {
+    dbtableList <- Obio@clusterSigEnrichmentList
+}
+} else {
+  dbtableList <- list(
+      "Cell Type Signatures" = "mysigdb_sc_sig",
+      "Cell Type Signatures" = "cibersort_L22",
+      "GO-MF" = "mysigdb_c5_MF",
+      "Pathways" = "mysigdb_c2_1329_canonical_pathways",
+      "Allen_Brain_Atlas" = "Allen_Brain_Atlas"
+  )
+}
+
+for (i in 1:length(dbtableList)){
+    
+    dfTemp <- unique(import.db.table.from.db(
+        host = Obio@dbDetailList$host,
+        dbname = Obio@dbDetailList$ref.cat.db,
+        dbtable = dbtableList [[i]],
+        password = db.pwd,
+        user = Obio@dbDetailList$db.user
+    ))
+    
+    rmVec <- grep("temp_", dfTemp$cat_type)
+    if (length(rmVec) > 0){
+        dfTemp <- dfTemp[-rmVec, ]
+    }
+    
+    dfTemp <- unique(dbcat2gmt(
+        dfTemp, # As downloaded from reference_categories_db_new database
+        gene.id.column = queryGS
+    ))
+    
+    dfTemp <- dfTemp[!duplicated(dfTemp[,1]), ]
+    
+    write.table(
+        dfTemp,
+        "temp.gmt.txt",
+        row.names = F, 
+        sep = "\t",
+        col.names = F,
+        quote = F
+    )
+    
+    CPgmt <- read.gmt("temp.gmt.txt")
+    unlink("temp.gmt.txt")
+    CPgmt <- unique(CPgmt[CPgmt$gene != "", ])
+    
+    gmtList[[dbtableList[[i]]]] <- CPgmt
+}
+
+## Edit collection names for plot
+names(gmtList) <- gsub("mysigdb_", "",names(gmtList))
+names(gmtList) <- gsub("c2_1329_canonical_p", "P",names(gmtList))
+names(gmtList) <- gsub("sc_sig", "CellSig",names(gmtList))
+names(gmtList) <- gsub("cibersort_L22", "CellSig",names(gmtList))
+names(gmtList) <- gsub("c5_", "GO_",names(gmtList))
+## Done creating gmt list
+###########################
+
+resList <- profileCluster(
+    # Input gmt file with categories to test: dfGmt
+    # Output: table with enrichments
+    obj = Obio,
+    markerList = Obio@dataTableList[["LRmarkerGeneList"]],
+    gmtList = gmtList,
+    nTop = 15,
+    pvalueCutoff= 0.5
+)
+
+plotList <- resList$plotList
+chnkVec <- resList$chnkVec
+
+if (length(plotList) > 3){
+    tabVar <- ".tabset .tabset-fade .tabset-dropdown"
+} else {
+    tabVar <- ".tabset .tabset-fade .tabset-pills"
+}
+``` 
+
+### Define Cell Type Categories Enriched in Individual Clusters {`r tabVar`}
+
+```{r CellTypePlot, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"} 
+
+cat(paste(knit(text = chnkVec, quiet = T), collapse = '\n'))
+
+``` 

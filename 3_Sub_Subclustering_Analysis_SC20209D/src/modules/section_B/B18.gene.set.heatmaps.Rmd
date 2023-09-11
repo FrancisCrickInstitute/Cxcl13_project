@@ -1,0 +1,312 @@
+<!-- Set PArameters Module -->
+<!-- Set the chnkPrefix to make all chunks unique in the overall folder -->
+```{r partB_gene_set_heatmaps, echo=TRUE, eval=TRUE, warning=FALSE}
+chnkPrefix <- "partB.cluster.table."
+VersionPdfExt <- VersionPdfExt <- paste0(".",chnkPrefix,"V", gsub("-", "", Sys.Date()), ".pdf")
+
+```
+
+
+
+### Gene Set Heatmaps {.tabset .tabset-fade .tabset-pills}
+```{r MakeHM, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"}
+
+## Two options: full heatmap and averaged heatmaps
+## https://satijalab.org/seurat/v3.0/interaction_vignette.html
+
+###############################################################################
+## Add percentage expressed genes                                            ##
+# DefaultAssay(OsC) <- "RNA"
+# my_genes <- rownames(x = OsC@assays$RNA)
+# 
+# exp <- FetchData(OsC, my_genes)
+# 
+# ExprMatrix <- round(as.matrix(colMeans(exp  > 0)) *100,1)
+# colnames(ExprMatrix)[1] <- "count_cut_off"
+# dfExprMatrix <- data.frame(ExprMatrix)
+# dfExprMatrix[["gene"]] <- row.names(dfExprMatrix)
+# 
+# Obio@dataTableList[["dfPercCellsExpr"]] <- dfExprMatrix
+# 
+# hmRelevantGenes <- as.vector(unique(dfExprMatrix[dfExprMatrix$count_cut_off > Obio@parameterList$singleCellPercExpressedMinCutOff, "gene"]))
+# 
+# 
+# 
+# ## Done adding percentage expressed                                          ##
+# ###############################################################################
+# 
+# 
+# ###############################################################################
+# ## Make plot according to reference categories                               ##
+# allGenes <- rownames(x = OsC@assays$RNA)
+# OsC <- ScaleData(OsC, verbose = FALSE, features=allGenes)
+# 
+# DefaultAssay(OsC) <- "RNA"
+# 
+# 
+# ## Add heatmap identities to meta.data ##
+# 
+OsC@meta.data[["hmIdent"]] <- paste0(
+     OsC@meta.data[,"seurat_clusters"],
+     "_",
+     substr(OsC@meta.data$sampleID,1,10)
+     
+)
+# 
+if (length(unique(OsC@meta.data$hmIdent)) > 25){
+     OsC@meta.data[["hmIdent"]] <- OsC@meta.data[,"seurat_clusters"]
+     
+}
+# 
+# Idents(OsC) <- "hmIdent"
+# 
+# ## Done adding heatmap identities to meta.data ##
+# 
+# printPdf <- TRUE
+# referenceList <- Obio@dataTableList$referenceList
+
+# for (i in 1:length(referenceList)){
+#     HMname <- names(referenceList)[i]
+#     geneVec <- unique(referenceList[[i]][referenceList[[i]] %in% rownames(x = OsC@assays$RNA)])
+#     
+#     if (length(geneVec) > 50){
+#         geneVec <- geneVec[geneVec %in% hmRelevantGenes]
+#     }
+#     
+#     
+#     ## Do Heatmap ##
+#     if (length(geneVec) < 1500 & length(geneVec) > 2){
+#         Idents(OsC) <- "hmIdent"
+#         HMname <- names(referenceList)[i]
+#         cat("\n")
+#         cat(paste0("**Heatmap ", HMname,"**"))
+#         cat("\n")
+#         cat("\n")
+#         ## Cluster genes ##
+#         HMgenes <- referenceList[[i]]
+#         #dfCluster <- OsC@assays$integrated
+#         Mexpr <- GetAssayData(object = OsC, assay.type = "integrated", slot = "scale.data")
+#         HMgenesSel <- HMgenes[HMgenes %in% row.names(Mexpr)]
+#         
+#         if (length(HMgenesSel) > 2){
+#             Mexpr <- Mexpr[HMgenesSel,]    
+#             
+#             pdf(paste0("temp", VersionPdfExt))
+#             hmRes <- make.hm(
+#                 m.df1 = Mexpr, 
+#                 filename = "", 
+#                 k.number = 1, 
+#                 n.colors = 1000, 
+#                 hclust.method = "complete", 
+#                 dist.method = "euclidean", 
+#                 main = "",
+#                 Colv = TRUE,
+#                 showRowNames = TRUE,
+#                 showColNames = F,
+#                 plotSeparationLines = FALSE
+#             )
+#             dev.off()
+#             
+#             orderedGenes <- as.vector(unique(row.names(hmRes$sorted)))
+#             
+#             if (length(unique(OsC@meta.data$hmIdent)) > 10){
+#                 removeKey <- TRUE
+#             } else {
+#                 removeKey <- FALSE
+#             }
+#             
+#             if (length(orderedGenes) <= 50){
+#                 label = TRUE
+#             } else {
+#                 label = FALSE
+#             }
+#             
+#             p1 <- DoHeatmap(
+#                 object = OsC, 
+#                 features = orderedGenes,
+#                 #group.by = "hmIdent",
+#                 draw.lines =T,
+#                 label = label,
+#                 group.bar = TRUE,
+#                 slot = "scale.data",
+#                 lines.width = 2 #With of separation lines in 'cells'
+#                 #slim.col.label = TRUE, 
+#                 #remove.key = removeKey
+#             ) + theme(legend.position = "none")
+#             
+#             print(p1)
+#             
+#             ## Save to file ##
+#             FNbase <- paste0("HM", HMname, VersionPdfExt)
+#             FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+#             FNrel <- paste0("report_figures/", FNbase)
+#             
+#             pdf(FN)
+#                 print(p1)
+#             dev.off()
+#             
+#             cat("\n")
+#             cat(paste0('Download a pdf of this figure [here](', FNrel, '). '))
+#             cat("\n")
+#             cat("\n")
+#             
+#         }
+#     }
+# }
+
+
+## Done making plots according to gene categories                            ##
+###############################################################################
+```
+
+```{r calculate-markdown-heatmap-chunks-dynamically, echo=F, eval=TRUE, warning=FALSE, results="asis"}
+#setwd(Obio@parameterList$localWorkDir)
+#load("temp.RData")
+# DefaultAssay(OsC) <- "RNA"
+# library(knitr)
+# library(ggplot2)
+# plotList <- list()
+# chnkVec <- as.vector(NULL, mode = "character")
+# 
+# #referenceList <- referenceList[c(1,2)]
+# 
+# for (i in 1:length(referenceList)) {
+#     ## Step 1 create Heatmap object ##
+#     HMname <- names(referenceList)[i]
+#     geneVec <- unique(referenceList[[i]][referenceList[[i]] %in% rownames(x = OsC@assays$RNA)])
+#     nGenes <- length(unique(geneVec))
+#     
+#     if (nGenes > 50){
+#         geneVec <- geneVec[geneVec %in% hmRelevantGenes]
+#         nGenes <- length(unique(geneVec))
+#         
+#         legendNote <- paste0(
+#             " Note: Only genes that were expressed in more than ",Obio@parameterList$singleCellPercExpressedMinCutOff,"% of all cells are shown in this figure. "
+#         )
+#         
+#     } else {
+#         legendNote <- paste0(
+#             "Note: All genes in this category are displayed in the heatmap. "
+#         )
+#     }
+#     
+#     
+#     ## Do Heatmap ##
+#     if (length(geneVec) < 1500 & length(geneVec) > 2){
+#         Idents(OsC) <- "hmIdent"
+#         HMname <- names(referenceList)[i]
+#         
+#         ## Cluster genes ##
+#         #HMgenes <- referenceList[[i]]
+#         #dfCluster <- OsC@assays$integrated
+#         Mexpr <- GetAssayData(object = OsC, assay.type = "integrated", slot = "scale.data")
+#         HMgenesSel <- geneVec[geneVec %in% row.names(Mexpr)]
+#         
+#         if (length(HMgenesSel) > 2){
+#             Mexpr <- Mexpr[HMgenesSel,]    
+#             
+#             pdf(paste0("temp", VersionPdfExt))
+#             hmRes <- make.hm(
+#                 m.df1 = Mexpr, 
+#                 filename = "", 
+#                 k.number = 1, 
+#                 n.colors = 1000, 
+#                 hclust.method = "complete", 
+#                 dist.method = "euclidean", 
+#                 main = "",
+#                 Colv = TRUE,
+#                 showRowNames = TRUE,
+#                 showColNames = F,
+#                 plotSeparationLines = FALSE
+#             )
+#             dev.off()
+#             
+#             orderedGenes <- as.vector(unique(row.names(hmRes$sorted)))
+#             
+#             if (length(unique(OsC@meta.data$hmIdent)) > 20){
+#                 removeKey <- TRUE
+#             } else {
+#                 removeKey <- FALSE
+#             }
+#             
+#             textSize <- 6
+#             if (length(orderedGenes) <= 50){
+#                 label = TRUE
+#                 if (length(orderedGenes) <= 20){
+#                     textSize <- 10
+#                 } 
+#             } else {
+#                 label = FALSE
+#             }
+#             
+#             
+#             plotList[[paste0("HM_", i)]] <- DoHeatmap(
+#                 object = OsC, 
+#                 features = orderedGenes,
+#                 #group.by = "hmIdent",
+#                 draw.lines =T,
+#                 label = label,
+#                 group.bar = TRUE,
+#                 slot = "scale.data",
+#                 lines.width = 2 #With of separation lines in 'cells'
+#                 #slim.col.label = TRUE, 
+#                 #remove.key = removeKey
+#             # ) + theme(legend.position = "none"
+#             ) + theme(text = element_text(size=textSize))
+#             
+#             ## Save to file ##
+#             FNbase <- paste0("HM", gsub(" ", "_", HMname), VersionPdfExt)
+#             FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+#             FNrel <- paste0("report_figures/", FNbase)
+#             
+#             pdf(FN)
+#                 print(plotList[[paste0("HM_", i)]])
+#             dev.off()
+#             
+#             
+#             ## Create R markdown chunk ##
+#             figLegend <- paste0(
+#                 "**Figure ", 
+#                 figureCount, 
+#                 ":** Heatmap showing gene category ", 
+#                 HMname, ". ", 
+#                 legendNote, 
+#                 "Download a pdf of this figure <a href='",FNrel,"' target='_blank'>here</a>. "
+#             )
+#             
+#             
+#             pos <- grep(names(referenceList)[i], names(Obio@parameterList$HmDisplayCatsFromDb))
+#             if (length(pos) ==1){
+#                 cat_id <- Obio@parameterList$HmDisplayCatsFromDb[[pos]]
+#                 figLegend <- paste0(
+#                     figLegend,
+#                     "An interactive version of this figure is available [here](",
+#                     "https://biologic.thecrick.org/", Obio@parameterList$project_id, "/category-view/", cat_id,
+#                     ")."
+#                 )
+#             }
+#             
+#             
+#             figureCount <- figureCount + 1 
+#             
+#             NewChnk <- paste0(
+#                 "#### Heatmap ",HMname,
+#                 "\n```{r Heatmap_",
+#                 i,", results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",
+#                 figLegend,"'}\n",
+#                 "\n",
+#                 "\n print(plotList[['",paste0("HM_", i),"']])",
+#                 "\n cat(  '\n')",
+#                 "\n\n\n```\n"   
+#             )
+#           
+#         }
+#     }
+#     chnkVec <- c(
+#         chnkVec,
+#         NewChnk
+#     )
+#     
+# }
+
+```

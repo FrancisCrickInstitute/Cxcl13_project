@@ -1,0 +1,159 @@
+<!-- Set PArameters Module -->
+<!-- Set the chnkPrefix to make all chunks unique in the overall folder -->
+```{r partB_pseudotime, echo=TRUE, eval=TRUE, warning=FALSE}
+chnkPrefix <- "partB.pseudotime."
+VersionPdfExt <- VersionPdfExt <- paste0(".",chnkPrefix,"V", gsub("-", "", Sys.Date()), ".pdf")
+
+```
+
+
+
+```{r pseudotime-enrichment-data, echo=T, eval=TRUE, warning=FALSE, results=F}
+
+## Add default ##
+pos <- grep("addDmaps", names(Obio@parameterList))
+if (length(pos) == 0){
+    Obio@parameterList[["addDmaps"]] <- FALSE
+}
+
+if (Obio@parameterList$addDmaps){
+    library(knitr)
+    library(ggplot2)
+    invertPT <- TRUE
+    
+    
+    plotList <- list()
+    chnkVec <- as.vector(NULL, mode = "character")
+    
+    
+    
+    library(Seurat)
+    library(destiny)
+    
+    dfPCA <- OsC@meta.data
+    dfPCA <- dfPCA[,grep("PC_", names(dfPCA))]
+    
+    dmPCA <- DiffusionMap(dfPCA)
+    
+    #dpt <- DPT(dm, tips = 268)
+    #dpt <- DPT(dm)
+    dpt <- DPT(dmPCA)
+    #pseudotime <- dpt$dpt
+    
+    # Plot DC1 vs DC2 and color the cells by their inferred diffusion pseudotime.
+    # We can accesss diffusion pseudotime via dpt$dpt.
+    df <- data.frame(
+      DC1 = eigenvectors(dmPCA)[, 1], 
+      DC2 = eigenvectors(dmPCA)[, 2], 
+      DC3 = eigenvectors(dmPCA)[, 3], 
+      "DM_Pseudotime" = dpt$dpt
+    )
+    
+    df$cellID <- row.names(dfPCA)
+    
+    ## For this project reverse pseudotime ##
+    if (invertPT){
+        PTmax <- max(df$DM_Pseudotime)
+        df$DM_Pseudotime <- -1* (df$DM_Pseudotime - PTmax)
+        ## Invert DC1, 2, 3
+        df$DC1 <- -1* df$DC1
+        df$DC2 <- -1* df$DC2
+        df$DC3 <- -1* df$DC3
+    }
+    
+    ## Add to table ##
+    df$cellID <- row.names(dfPCA)
+    
+    ## add here ##
+    OsC <- addDf2seuratMetaData(
+      obj = OsC, 
+      dfAdd = df
+    )
+    
+    ## Create Pseudotime plot ##
+    dfTemp <- OsC@meta.data
+    #dotsize <- 0.5
+    dotcolor <- "darkblue"
+    tag <- "PC1PC2all"
+    
+    plotList[[tag]] <- ggplot(dfTemp, aes(PC_1, PC_2, color=DM_Pseudotime)
+        )+ geom_point( 
+            shape = 16,
+            size = as.numeric(dotsize)
+        ) + xlab("PC1") + ylab("PC2") + scale_color_gradient(
+            "Pseudotime",
+            low="#ff6600", 
+            high=dotcolor #, 
+            #limits=c(0,maxExpr)
+        ) + theme_bw(
+        ) +  theme(
+            axis.text.y   = element_text(size=8),
+            axis.text.x   = element_text(size=8),
+            axis.title.y  = element_text(size=8),
+            axis.title.x  = element_text(size=8),
+            axis.line = element_line(colour = "black"),
+            panel.border = element_rect(colour = "black", fill=NA, size=1),
+            plot.title = element_text(hjust = 0.5, size = 12)
+        ) + ggtitle("PC1, PC2 and DM Pseudotime"
+        )  #+ xlim(minX, maxX) + ylim(minY, maxY)  
+    
+    
+    
+            ## Save to file ##
+            FNbase <- paste0("Pseudotime_overview", VersionPdfExt)
+            FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+            FNrel <- paste0("report_figures/", FNbase)
+            
+           
+            pdf(FN)
+            print(plotList[[tag]])
+            dev.off()
+            
+            
+            
+            ## Create R markdown chunk ##
+            figLegend <- paste0(
+                '**Figure ', 
+                figureCount, 
+                '**: Figure depicting PCA components 1 and 2 with the diffusion map pseudotime highlighted in color. Download a pdf of this figure <a href="',FNrel,'" target="_blank">here</a>. '
+            )
+            figureCount <- figureCount + 1 
+            
+            NewChnk <- paste0(
+                "\n#### Pseudotime All Timepoints", 
+                "\n```{r ", tag, ", results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",
+                figLegend,"'}\n",
+                "\n",
+                "\n print(plotList[['",tag,"']])",
+                "\n cat(  '\n')",
+                "\n\n\n```\n"   
+            )
+            
+            chnkVec <- c(
+                chnkVec,
+                NewChnk
+            )
+} # end dmap
+
+
+if (length(plotList) > 3){
+    tabVar <- ".tabset .tabset-fade .tabset-dropdown"
+} else {
+    tabVar <- ".tabset .tabset-fade .tabset-pills"
+}
+
+```
+
+### Pseudotime {`r tabVar`} 
+
+```{r pseudotime-plot, echo=T, eval=TRUE, warning=FALSE, results='asis'}
+###############################################################################
+## Do category enrichment on clusters                                        ##
+if (Obio@parameterList$addDmaps){
+    cat(paste(knit(text = chnkVec, quiet = T), collapse = '\n'))
+}
+## Done doing enrichment on clusters                                         ##
+###############################################################################
+
+
+```

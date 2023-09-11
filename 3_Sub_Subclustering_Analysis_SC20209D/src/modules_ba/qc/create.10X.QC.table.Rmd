@@ -1,0 +1,196 @@
+<!-- Set PArameters Module -->
+<!-- Set the chnkPrefix to make all chunks unique in the overall folder -->
+```{r set_QC_parameters_init, echo=TRUE, eval=TRUE, warning=FALSE}
+chnkPrefix <- "create.10X.QC.table."
+VersionPdfExt <- VersionPdfExt <- paste0(".",chnkPrefix,"V", gsub("-", "", Sys.Date()), ".pdf")
+
+```
+
+
+```{r create_10X_QC_table, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"}
+###############################################################################
+## Create 10X QC table                                                       ##
+
+
+tableCreated <- FALSE
+sampleNames <- names(Obio@sampleDetailList)
+cmdDocuVec <- as.vector(NULL, mode = "character")
+
+for (i in 1:length(sampleNames)){
+    if (Obio@sampleDetailList[[sampleNames[i]]]$type == "TenX"){
+        baseFN <- Obio@sampleDetailList[[sampleNames[i]]]$path
+        summaryFN <- gsub("filtered_feature_bc_matrix", "metrics_summary.csv", baseFN)
+        if (file.exists(summaryFN)){
+            dfTemp <- read.csv(summaryFN)
+            dfTemp[["sampleName"]] <- sampleNames[i]
+            if (!tableCreated){
+                tableCreated = TRUE
+                dfRes <- dfTemp
+            } else {
+                dfRes <- rbind(
+                    dfRes,
+                    dfTemp
+                )
+            }
+        }
+        
+        cmdFN <- paste0(
+            gsub(
+                "outs/filtered_feature_bc_matrix", 
+                "", 
+                Obio@sampleDetailList[[i]]$path
+            ),
+            "_cmdline"
+        )
+        
+        if (file.exists(cmdFN)){
+                dfCMD <- read.delim(
+                    cmdFN,
+                    header = F
+                )
+                cmdAddVec <- c(
+                        paste0("**",names(Obio@sampleDetailList)[i],"**"),
+                        "\n",
+                        as.vector(dfCMD[1,1]),
+                        "\n",
+                        "\n"
+                        
+                )
+                cmdDocuVec <- c(cmdDocuVec, cmdAddVec)
+        }
+    }
+}
+
+if (exists("dfRes")){
+dfRes <- data.frame(t(dfRes))
+colVec <- as.vector(t(dfRes["sampleName",]))
+names(dfRes) <- colVec
+
+
+dfRes[["Parameter"]] <- row.names(dfRes)
+dfRes <- dfRes[!(row.names(dfRes) %in% c("sampleName")),]
+row.names(dfRes) <- NULL
+colVec <- c("Parameter", colVec)
+dfRes <- dfRes[,colVec]
+dfRes$Parameter <- gsub("[.]", " ", dfRes$Parameter)
+
+
+###############################################################################
+## Write table to Excel File                                                 ##
+
+createXLSXoutput(
+    dfTable = dfRes,
+    outPutFN = paste0(Obio@parameterList$reportTableDir ,Obio@parameterList$project_id, "_QC_Parameter_Table.xlsx"),
+    tableName = paste0(Obio@parameterList$project_id, "_QC_Parameter_Table")
+)
+
+## Done creating Excel output table                                          ##
+###############################################################################
+
+
+FNbase <- paste0(Obio@parameterList$project_id, "_QC_Parameter_Table.xlsx")
+FN <- paste0(Obio@parameterList$reportTableDir, FNbase)
+FNrel <- paste0("report_tables/", FNbase)
+
+
+tabDownloadLink <- paste0("The quality measures table can be downloaded [here](",FNrel,")")
+
+tabLegend = paste0(
+    "**Table: ** QC Parameters for all 10X single-cell samples in this experiment. ",
+    tabDownloadLink
+)
+
+chnkVec <- paste0(
+        #"#### ", names(dtList),
+        "\n```{r QC_datatable, results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",
+        tabLegend,"'}\n",
+        "\n",
+        "\n DT::datatable(dfRes,rownames = FALSE,  escape = FALSE)",
+        "\n cat(  '\n')",
+        "\n\n\n```\n"   
+    )
+    tabVar <- "### Create QC Table"
+}   else {
+    tabVar <- ""
+}
+
+
+## Make CMD section ##
+if (exists("cmdDocuVec") & length(cmdDocuVec) > 0){
+    cellRangerVar <- "### CellRanger Count Commands"    
+} else {
+    cellRangerVar <- ""
+}
+## Done creating one table per cluster                                      ##
+##############################################################################
+```
+
+
+`r cellRangerVar`
+```{r cellRangerCommands, echo=F, eval=TRUE, warning=FALSE, results="asis"}
+
+if (exists("cmdDocuVec") & length(cmdDocuVec) > 0){
+    for (i in 1:length(cmdDocuVec)){
+        print(cmdDocuVec[i])
+    }
+    
+} 
+```
+
+`r tabVar`
+```{r render_QCTable, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"}
+
+if (exists("dfRes")){
+    cat(paste(knitr::knit(text = chnkVec, quiet = T), collapse = '\n'))
+    
+} 
+```
+
+```{r QC_raw_data, echo=TRUE, eval=TRUE, warning=FALSE, results=F}
+
+###############################################################################
+## Create Cell Ranger QC Plots                                               ##
+if (exists("dfRes")){
+## Add if clause to check 10X
+resList <- doCRplots(
+    obj = Obio,
+    figureCount = figureCount,
+    VersionPdfExt = VersionPdfExt,
+    tocSubLevel = 4,
+    dotsize = 0.5
+) 
+
+plotListQC1 <- resList$plotListQC1
+chnkVec <- resList$chnkVec
+figureCount <- resList$figureCount
+    if (length(plotListQC1) > 3){
+        
+        tabVar <- "### CellRanger QC {.tabset .tabset-fade .tabset-dropdown}"
+    } else {
+        
+        tabVar <- "### CellRanger QC {.tabset .tabset-fade .tabset-pills}"
+    }
+
+    
+        
+} else {
+    tabVar <- ""
+}
+
+## Done create cellRanger QC plots                                           ##
+###############################################################################
+
+
+ 
+```
+
+
+`r tabVar`
+
+```{r Plot_tsne_data_plotting, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"} 
+if (exists("dfRes")){
+cat(paste(knitr::knit(text = chnkVec, quiet = T), collapse = '\n'))
+}
+
+```
+

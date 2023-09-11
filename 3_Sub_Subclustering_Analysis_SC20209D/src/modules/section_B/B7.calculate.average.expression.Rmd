@@ -1,0 +1,177 @@
+<!-- Set PArameters Module -->
+<!-- Set the chnkPrefix to make all chunks unique in the overall folder -->
+```{r partB_calculate_avg_expr, echo=TRUE, eval=TRUE, warning=FALSE}
+chnkPrefix <- "partB.calculate.avg.expr."
+VersionPdfExt <- VersionPdfExt <- paste0(".",chnkPrefix,"V", gsub("-", "", Sys.Date()), ".pdf")
+
+```
+
+
+
+### Calculate Average Expression Per Cluster
+```{r Identify differential expressed genes across conditions, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"}
+## Ensure that hmIdent exists ##
+
+## Want to average by cluster and subset by sampleID ##
+###############################################################################
+## Calculataing average expression across all samples                        ##
+OsC@meta.data[["all"]] <- "all"
+Idents(OsC) <- "all"
+cluster.averages <- AverageExpression(OsC, return.seurat = TRUE)
+
+## Retrieved Scaled data ##
+dfAvgExpr <- data.frame(cluster.averages[["RNA"]]@data)
+#dfAvgExpr <- dfAvgExpr[,sort(names(dfAvgExpr))]
+dfAvgExpr[["gene"]] <- row.names(dfAvgExpr)
+
+dfAvgScaledData <- data.frame(cluster.averages[["RNA"]]@scale.data)
+#dfAvgScaledData <- dfAvgScaledData[,sort(names(dfAvgScaledData))]
+dfAvgScaledData[["gene"]] <- row.names(dfAvgScaledData)
+
+
+Obio@dataTableList[["dfAvglg10ExprAll"]] <- dfAvgExpr
+Obio@dataTableList[["dfAvglg10ExprAllScaled"]] <- dfAvgScaledData
+## Done                                                                      ##
+###############################################################################
+
+# OsC@meta.data[["clustIdent"]] <- paste0(
+#     "C_", OsC@meta.data[,"seurat_clusters"]
+# )
+
+## Order by Seurat cluster order for now ##
+#OsC@meta.data <- OsC@meta.data[order(OsC@meta.data$seurat_clusters),]
+
+#OsC@meta.data$clusterName <- factor(OsC@meta.data$clusterName , levels = c(unique(OsC@meta.data$clusterName)))
+
+Idents(OsC) <- "clusterName"
+#Idents(OsC) <- factor(Idents(OsC), levels = unique(levels(OsC)))
+
+if (length(grep("sampleName", names(OsC@meta.data))) > 0){
+  
+    OsC@meta.data[["cluster_sample"]] <- paste0(
+        OsC@meta.data$clusterName, "_", OsC@meta.data$sampleName
+    )
+    
+    Idents(OsC) <- "cluster_sample"
+    Idents(OsC) <- factor(Idents(OsC), levels = c(unique(OsC@meta.data$cluster_sample)))
+    #OsC@meta.data$cluster_sample <- factor(OsC@meta.data$cluster_sample , levels = c(unique(OsC@meta.data$cluster_sample)))
+    
+    #Idents(OsC) <- "cluster_sample"
+    cluster.averages <- AverageExpression(OsC, return.seurat = TRUE)
+    
+    
+} else {
+    cluster.averages <- AverageExpression(OsC, return.seurat = TRUE)
+}
+
+#Idents(OsC) <- "sampleName"
+
+
+## Retrieved Scaled data ##
+dfAvgExpr <- data.frame(cluster.averages[["RNA"]]@data)
+dfAvgExpr <- dfAvgExpr[,sort(names(dfAvgExpr))]
+
+
+
+dfAvgExpr[["gene"]] <- row.names(dfAvgExpr)
+
+dfAvgScaledData <- data.frame(cluster.averages[["RNA"]]@scale.data)
+dfAvgScaledData <- dfAvgScaledData[,sort(names(dfAvgScaledData))]
+dfAvgScaledData[["gene"]] <- row.names(dfAvgScaledData)
+
+
+Obio@dataTableList[["dfAvglg10ExprByClusterBySample"]] <- dfAvgExpr
+Obio@dataTableList[["dfAvglg10ExprByClusterBySampleScaled"]] <- dfAvgScaledData
+###############################################################################
+
+###############################################################################
+## Average by Cluster                                                        ##
+Idents(OsC) <- "clusterName"
+
+cluster.averages <- AverageExpression(OsC, return.seurat = TRUE)
+
+dfAvgExpr <- data.frame(cluster.averages[["RNA"]]@data)
+dfAvgExpr <- data.frame(dfAvgExpr[,sort(names(dfAvgExpr))])
+
+
+## Done                                                                      ##
+###############################################################################
+
+
+
+dfAvgExpr[["gene"]] <- row.names(dfAvgExpr)
+
+dfAvgScaledData <- data.frame(cluster.averages[["RNA"]]@scale.data)
+dfAvgScaledData <- dfAvgScaledData[,sort(names(dfAvgScaledData))]
+dfAvgScaledData[["gene"]] <- row.names(dfAvgScaledData)
+
+
+Obio@dataTableList[["dfAvglg10ExprPerCluster"]] <- dfAvgExpr
+Obio@dataTableList[["dfAvglg10ExprPerClusterScaled"]] <- dfAvgScaledData
+
+## Done Average by Cluster                                                   ##
+###############################################################################
+
+###############################################################################
+## Average gene expression by sample                                         ##
+
+
+Idents(OsC) <- "sampleName"
+cluster.averages <- AverageExpression(OsC, return.seurat = TRUE)
+
+## Retrieved Scaled data ##
+dfAvgExpr <- data.frame(cluster.averages[["RNA"]]@data)
+dfAvgExpr[["gene"]] <- row.names(dfAvgExpr)
+selVec <- names(dfAvgExpr)
+
+
+###############################################################################
+## Order average expression by cluster similarity (most variable genes)      ##
+assay <- NULL
+assay <- assay %||% DefaultAssay(object = OsC)
+
+features <- VariableFeatures(object = OsC)
+features <- intersect(x = features, y = rownames(x = OsC))
+data.avg <- AverageExpression(object = OsC, assays = assay, 
+features = features, slot = "data", verbose = T)[[1]]
+
+if (ncol(data.avg) > 1){
+data.dist <- dist(x = t(x = data.avg[features, ]))
+dforder <- hclust(d = data.dist)
+orderVec <- names(dfAvgExpr)[dforder$order]
+} else {
+  orderVec <- colnames(data.avg)
+}
+
+Obio@parameterList[["sampleIDOrder"]] <- orderVec
+
+dfAvgExpr <- data.frame(dfAvgExpr[,c("gene",orderVec) ])
+
+
+
+## Reset sample order by clustering ##
+#OsC@meta.data$sampleID
+
+## Done                                                                      ##
+###############################################################################
+
+
+
+dfAvgScaledData <- data.frame(cluster.averages[["RNA"]]@scale.data)
+selVec <- names(dfAvgScaledData)
+
+dfAvgScaledData[["gene"]] <- row.names(dfAvgScaledData)
+selVec <- c("gene", selVec)
+
+dfAvgScaledData <- dfAvgScaledData[,selVec]
+
+
+Obio@dataTableList[["dfAvglg10ExprBySample"]] <- dfAvgExpr
+Obio@dataTableList[["dfAvglg10ExprBySampleScaled"]] <- dfAvgScaledData
+
+
+## Done average gene expression by sample                                    ##
+###############################################################################
+
+
+```

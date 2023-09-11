@@ -1,0 +1,332 @@
+<!-- Set PArameters Module -->
+<!-- Set the chnkPrefix to make all chunks unique in the overall folder -->
+```{r partB_N_cell_barchart, echo=TRUE, eval=TRUE, warning=FALSE}
+chnkPrefix <- "partB.N.cell.barchart."
+VersionPdfExt <- VersionPdfExt <- paste0(".",chnkPrefix,"V", gsub("-", "", Sys.Date()), ".pdf")
+
+```
+
+
+
+```{r make_percent_N_cells_barchart, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"}
+###############################################################################
+## Create datatable for plotting                                             ##
+
+
+## This plotting procedure requires three sets: the sets cellTypeIDs, clusterIDs, cellTypeIDs
+## level1ID, level2ID, level3ID
+dfSample <- unique(OsC@meta.data[,c("sampleName", "sampleColor", "sampleID")])
+row.names(dfSample) <- dfSample$sampleID
+dfSample <- dfSample[names(Obio@sampleDetailList),]
+
+sampleIDs <- dfSample$sampleName
+colVec <- dfSample$sampleColor
+
+clusterIDs <- unique(OsC@meta.data[,"sampleName"])
+
+if (length(grep("cellIdent", names(OsC@meta.data))) == 0){
+  OsC@meta.data[["cellIdent"]] <- "All"
+}
+
+cellTypeIDs <- unique(OsC@meta.data[,"cellIdent"])
+
+dfTemp <- OsC@meta.data
+
+if (length(grep("^cellIdent$", names(dfTemp))) == 0){
+  dfTemp[["cellIdent"]] <- "All"
+}
+
+#dfTemp <- dfTemp[dfTemp$percent.mt <= max(Obio@parameterList$singleCellSeuratMtCutoff), ]
+dfTemp[["cellID"]] <- row.names(dfTemp)
+dfTemp <- unique(dfTemp[,c("cellID", "sampleName", "clusterName", "cellIdent")])
+names(dfTemp) <- gsub("clusterName", "Cluster", names(dfTemp) )
+
+ dfTemp <- unique(dfTemp[,c("cellID", "sampleName", "Cluster","cellIdent")])
+ 
+dfRes <- dfTemp
+dfRes$cellID <- NULL
+row.names(dfRes) <- NULL
+dfRes <- unique(dfRes)
+dfRes[["N_cells"]] <- 0
+
+
+for (i in 1:nrow(dfRes)){
+  dfRes[i, "N_cells"] <- nrow(dfTemp[dfTemp$sampleName == dfRes[i,"sampleName"] & dfTemp$Cluster == dfRes[i,"Cluster"] & dfTemp$cellIdent == dfRes[i,"cellIdent"], ])
+}
+
+
+
+
+## Calculate cluster percentages per celltypeID ##
+dfRes[["Perc_cells"]] <- 0
+for (i in 1:length(cellTypeIDs)){
+  dfResTemp2 <- dfRes[dfRes$cellIdent == cellTypeIDs[i], ]
+  tempCluster <- as.vector(unique(dfResTemp2$Cluster))
+  
+  for (j in 1:length(tempCluster)){
+    dfResTemp3 <- dfResTemp2[dfResTemp2$Cluster == tempCluster[j],]
+    NclusterTotal <- sum(dfResTemp3[, "N_cells"])
+    dfResTemp3[,"Perc_cells"] <- round(dfResTemp3[,"N_cells"]/NclusterTotal, 4)*100
+    
+    
+    if (j ==1){
+      dfRes3 <- dfResTemp3
+    } else {
+      dfRes3 <- rbind(dfResTemp3, dfRes3)
+    }
+  }
+  
+  if (i ==1){
+    dfRes4 <- dfRes3
+  } else {
+    dfRes4 <- rbind(dfRes3, dfRes4)
+  }
+  
+}
+ 
+dfRes <- dfRes4
+
+plotList <- list()
+chnkVec <- as.vector(NULL, mode = "character")
+
+for (i in 1:length(cellTypeIDs)){
+  #############################################################################
+  ## Create cell number plot                                                 ##
+  tag <- paste0(cellTypeIDs[i], "_Number")
+  dfResTemp <- dfRes[dfRes$cellIdent == cellTypeIDs[i], ]
+  
+  ## Set cluster order large to small ##
+  library(tidyverse)
+
+  df <- dfResTemp[,c("Cluster", "N_cells")]
+  
+  df <- df %>% 
+    group_by(Cluster) %>% 
+    summarise(N_cells = sum(N_cells)) %>% arrange(desc(N_cells))
+  
+  levels <- df$Cluster
+  dfResTemp$Cluster <- factor(dfResTemp$Cluster, levels = levels)
+  
+  ## Order ##
+   
+   plotList[[tag]] <- ggplot(
+    ) + geom_bar(aes(y = N_cells, x = Cluster, fill = sampleName), data = dfResTemp, stat="identity"
+    ) + labs(title="Cell Numbers Per Cluster", x="", y = "Cell Count"
+    ) + theme_bw(
+    ) +  theme(
+      panel.border = element_rect(colour = "black", fill=NA, size=1),
+      plot.title = element_text(hjust = 0.5, size = 12)
+    ) + coord_flip() + guides(fill=guide_legend(title="Samples"))
+  
+  h <- sum(c("sampleName", "sampleColor") %in% names(OsC@meta.data))
+  if (h ==2){
+      dfCol <- unique(OsC@meta.data[,c("sampleName", "sampleColor")])
+      dfCol <- dfCol[dfCol$sampleName %in% unique(dfResTemp$sampleName), ]
+      colVec <- as.vector(dfCol$sampleColor)
+      names(colVec) <- as.vector(dfCol$sampleName)
+      plotList[[tag]] <- plotList[[tag]] + scale_fill_manual("Samples" ,values = colVec
+      ) 
+  }
+  
+  ## Calculate percentages for this subset ##
+  
+ 
+  
+  ###########################################################################
+  ## Save plot to file                                                     ##
+  FNbase <- paste0(tag,".Ncells", VersionPdfExt)
+  FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+  FNrel <- paste0("report_figures/", FNbase)
+    
+  pdf(FN)
+      print(plotList[[tag]])
+  dev.off()
+  ##                                                                       ##
+  ###########################################################################
+    
+  ###########################################################################
+  ## Add to chunk                                                          ##
+  figCap <- paste0(
+      '**Figure ',
+      figureCount,
+      'A:** Cell Count in each cluster for ', 
+      tag,
+      'Download a pdf of this figure <a href="',FNrel,'" target="_blank">here</a>. '
+  )
+  
+  NewChnk <- paste0(
+    paste0("#### Barchart_ ", tag),
+        "\n```{r Barchart-",tag,", results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",figCap,"'}\n",
+        "\n",
+        "\n print(plotList[['",tag,"']])",
+        "\n cat(  '\n')",
+        "\n\n\n```\n"   
+  )
+    
+  chnkVec <- c(
+      chnkVec,
+      NewChnk
+  )
+  ## Done adding                                                             ##
+  #############################################################################
+  
+  #############################################################################
+  ## Add percentage plot                                                     ##
+  tag <- paste0(cellTypeIDs[i], "_Percent")
+  plotList[[tag]] <- ggplot(
+    ) + geom_bar(aes(x = Cluster, y = Perc_cells, fill = sampleName), data = dfResTemp, stat="identity"
+    ) + labs(title="Percent Cells Per Cluster", x="", y = "Percent Cells"
+    ) + theme_bw(
+    ) +  theme(
+      panel.border = element_rect(colour = "black", fill=NA, size=1),
+      plot.title = element_text(hjust = 0.5, size = 12)
+    ) +  coord_flip() 
+  
+   h <- sum(c("sampleName", "sampleColor") %in% names(OsC@meta.data))
+  if (h ==2){
+      dfCol <- unique(OsC@meta.data[,c("sampleName", "sampleColor")])
+      dfCol <- dfCol[dfCol$sampleName %in% unique(dfResTemp$sampleName), ]
+      colVec <- as.vector(dfCol$sampleColor)
+      names(colVec) <- as.vector(dfCol$sampleName)
+      plotList[[tag]] <- plotList[[tag]] + scale_fill_manual("Samples" ,values = colVec
+      ) 
+  }
+  
+  ###########################################################################
+  ## Save plot to file                                                     ##
+  FNbase <- paste0(tag, ".percent.cells",VersionPdfExt)
+  FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+  FNrel <- paste0("report_figures/", FNbase)
+    
+  pdf(FN)
+      print(plotList[[tag]])
+  dev.off()
+  ##                                                                       ##
+  ###########################################################################
+    
+  ###########################################################################
+  ## Add to chunk                                                          ##
+  figCap <- paste0(
+      '**Figure ',
+      figureCount,
+      'B:** Cell percentages in each cluster for ', 
+      tag,
+      'Download a pdf of this figure <a href="',FNrel,'" target="_blank">here</a>. '
+  )
+  
+  NewChnk <- paste0(
+    paste0("#### Barchart_ ", tag),
+        "\n```{r Barchart-percent_",tag,", results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",figCap,"'}\n",
+        "\n",
+        "\n print(plotList[['",tag,"']])",
+        "\n cat(  '\n')",
+        "\n\n\n```\n"   
+  )
+    
+  chnkVec <- c(
+      chnkVec,
+      NewChnk
+  )
+  ## Done adding percentage plot                                             ##
+  #############################################################################
+  
+  
+  figureCount <- figureCount + 1
+  
+  #############################################################################
+  ## Order Percent Cells by Similarity
+  if (!is.null(Obio@parameterList$clusterNameOrder)){
+        #############################################################################
+        ## Add percentage plot                                                     ##
+        if (sum(unique(dfResTemp$Cluster) %in% Obio@parameterList$clusterNameOrder) == length(Obio@parameterList$clusterNameOrder)){
+            dfResTemp$Cluster <- factor(dfResTemp$Cluster, levels = Obio@parameterList$clusterNameOrder)
+        }
+        
+        
+        
+        tag <- paste0(cellTypeIDs[i], "_Percent_clustered")
+        plotList[[tag]] <- ggplot(
+          ) + geom_bar(aes(x = Cluster, y = Perc_cells, fill = sampleName), data = dfResTemp, stat="identity"
+          ) + labs(title="Percent Cells Per Cluster Clustered", x="", y = "Percent Cells"
+          ) + theme_bw(
+          ) +  theme(
+            panel.border = element_rect(colour = "black", fill=NA, size=1),
+            plot.title = element_text(hjust = 0.5, size = 12)
+          ) +  coord_flip() 
+        
+         h <- sum(c("sampleName", "sampleColor") %in% names(OsC@meta.data))
+        if (h ==2){
+            dfCol <- unique(OsC@meta.data[,c("sampleName", "sampleColor")])
+            dfCol <- dfCol[dfCol$sampleName %in% unique(dfResTemp$sampleName), ]
+            colVec <- as.vector(dfCol$sampleColor)
+            names(colVec) <- as.vector(dfCol$sampleName)
+            plotList[[tag]] <- plotList[[tag]] + scale_fill_manual("Samples" ,values = colVec
+            ) 
+        }
+        
+        ###########################################################################
+        ## Save plot to file                                                     ##
+        FNbase <- paste0(tag, ".percent.cells.clustered",VersionPdfExt)
+        FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+        FNrel <- paste0("report_figures/", FNbase)
+          
+        pdf(FN)
+            print(plotList[[tag]])
+        dev.off()
+        ##                                                                       ##
+        ###########################################################################
+          
+        ###########################################################################
+        ## Add to chunk                                                          ##
+        figCap <- paste0(
+            '**Figure ',
+            figureCount,
+            'C:** Cell percentages in each cluster for ', 
+            tag,'. Clustered by cluster similarity.',
+            'Download a pdf of this figure <a href="',FNrel,'" target="_blank">here</a>. '
+        )
+        
+        NewChnk <- paste0(
+          paste0("#### Barchart_ ", tag),
+              "\n```{r Barchart-percent_",tag,", results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",figCap,"'}\n",
+              "\n",
+              "\n print(plotList[['",tag,"']])",
+              "\n cat(  '\n')",
+              "\n\n\n```\n"   
+        )
+          
+        chnkVec <- c(
+            chnkVec,
+            NewChnk
+        )
+        ## Done adding percentage plot                                             ##
+        #############################################################################
+        
+        
+        figureCount <- figureCount + 1
+      
+  }
+  
+  
+  ##
+  #############################################################################
+  
+}
+
+## Done creating data table                                                  ##
+###############################################################################
+
+if (length(plotList) > 3){
+    tabVar <- ".tabset .tabset-fade .tabset-dropdown"
+} else {
+    tabVar <- ".tabset .tabset-fade .tabset-pills"
+}
+
+```
+
+### Barchart N cells and Percent in Clusters {`r tabVar`}
+if you could prepare a bar-shape graph with the %of cells clusters representing our populations (like in the Nat Med)
+
+```{r plot_barchart, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"}
+cat(paste(knit(text = chnkVec, quiet = T), collapse = '\n'))
+```

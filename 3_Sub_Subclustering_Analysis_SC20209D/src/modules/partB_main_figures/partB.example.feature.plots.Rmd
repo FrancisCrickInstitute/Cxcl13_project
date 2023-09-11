@@ -1,0 +1,99 @@
+<!-- Set PArameters Module -->
+<!-- Set the chnkPrefix to make all chunks unique in the overall folder -->
+```{r partB_example_feature_plots, echo=TRUE, eval=TRUE, warning=FALSE}
+chnkPrefix <- "partB.example.feature.plots."
+VersionPdfExt <- VersionPdfExt <- paste0(".",chnkPrefix,"V", gsub("-", "", Sys.Date()), ".pdf")
+
+```
+
+
+
+### Example Feature Plots {.tabset .tabset-fade .tabset-pills}
+```{r ExampleFeaturePlot_dataprep, echo=TRUE, eval=TRUE, warning=FALSE,  results="asis"}
+DefaultAssay(OsC) <- "RNA"
+
+cat(paste0(
+    'Feature plots for any gene in this experiment can be viewed <a href="https://biologic.crick.ac.uk/mdata/',Obio@parameterList$project_id,'/html/FeatureView.html" target="_blank">here</a>.'
+))
+
+
+
+plotGenes <- c(
+    Obio@dataTableList$referenceList$integrated_top30var[1:5]
+)
+
+plotParts <- length(plotGenes)
+
+chnkVec <- as.vector(NULL, mode = "character")
+plotListF <- list()
+
+for (i in 1:plotParts){
+    tag1 <- paste0("Featureplot_",i)
+    
+    featureGenes <- plotGenes[i]
+    
+    plotListF[[tag1]] <- FeaturePlot(
+        OsC,
+        features = featureGenes,
+        #split.by = "orig.ident",
+        reduction = Obio@parameterList$primReduction
+    )
+    
+    
+    ## Save to file ##
+    FNbase <- paste0("Featureplot.", plotGenes[((2*i)-1)], ".", plotGenes[((2*i))],".", VersionPdfExt)
+        FN <- paste0(Obio@parameterList$reportFigDir, FNbase)
+    FNrel <- paste0("report_figures/", FNbase)
+    
+    pdf(FN)
+        print(plotListF[[tag1]])
+    dev.off()
+    
+    if (exists("shinyURL") & !is.null(shinyURL)){
+        
+            linkFeatureView <- paste0(
+              'An interactive version of this figure with additional viewing options can be found <a href="',shinyURL,'?_inputs_&gene=%22',featureGenes,'%22" target="_blank">here</a>. '
+            )
+            
+    } else {
+        linkFeatureView <- ""
+    }
+    
+    
+    
+    
+    
+
+    figLegend <-  paste0(
+        "**Figure ", 
+        figureCount, 
+        ":** Gene expression plot for ", 
+        featureGenes,
+        linkFeatureView
+    )
+      
+    NewChnk <- paste0(
+        "#### Featureplot ", plotGenes[i],
+        "\n```{r FeaturePlot_", i,
+        ", results='asis', echo=F, eval=TRUE, warning=FALSE, fig.cap='",
+        figLegend,"'}\n",
+        "\n",
+        "\n print(plotListF[['",tag1,"']])",
+        "\n cat(  '\n')",
+        "\n\n\n```\n"   
+    )
+    
+    chnkVec <- c(
+        chnkVec,
+        NewChnk
+    )
+
+}
+
+```
+
+```{r ExampleFeaturePlot, echo=TRUE, eval=TRUE, warning=FALSE, results="asis"} 
+
+cat(paste(knit(text = chnkVec, quiet = T), collapse = '\n'))
+
+```
